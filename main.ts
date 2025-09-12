@@ -31,7 +31,7 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
     const text = await response.text();
 
     if (await response.text() === 'not-found-last-donation') {
-      console.warn(
+      console.log(
         `webhook에서 not-found-last-donation를 받았습니다. 다음 페이지를 포함하여 탐색합니다. (pageNumber: ${pageNumber})`,
       );
 
@@ -42,7 +42,7 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
   }
 
   if (!response.ok) {
-    console.log('webhook에서 오류 응답을 받았습니다.');
+    console.error('webhook에서 오류 응답을 받았습니다.');
     throw new Error(await response.text());
   }
 

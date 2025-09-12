@@ -1,0 +1,17 @@
+{
+  "tasks": {
+    "start": "deno run -A --env-file=.env main.ts",
+    "dev": "deno run -A --watch --env-file=.env main.ts"
+  },
+  "fmt": {
+    "singleQuote": true
+  },
+  "lint": {
+    "rules": {
+      "exclude": ["no-explicit-any"]
+    }
+  },
+  "imports": {
+    "playwright": "npm:playwright@^1.54.1"
+  }
+}

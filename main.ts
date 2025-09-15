@@ -38,11 +38,14 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
       await getDonationItemsAndSendWebhook(pageNumber + 1);
     }
 
+    console.error('webhook에서 오류 응답을 받았습니다.');
+    console.error(`[${response.status}]`, text);
     throw new Error(text);
   }
 
   if (!response.ok) {
     console.error('webhook에서 오류 응답을 받았습니다.');
+    console.error(`[${response.status}]`, await response.text());
     throw new Error(await response.text());
   }
 
@@ -50,7 +53,7 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
     `webhook에서 성공적으로 응답을 받았습니다. (pageNumber: ${pageNumber})`,
   );
 
-  console.log(await response.text());
+  console.log(`[${response.status}]`, await response.text());
 };
 
 await getDonationItemsAndSendWebhook(1).finally(async () => {

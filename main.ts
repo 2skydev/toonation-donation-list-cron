@@ -49,6 +49,8 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
   console.log(
     `webhook에서 성공적으로 응답을 받았습니다. (pageNumber: ${pageNumber})`,
   );
+
+  console.log(await response.text());
 };
 
 await getDonationItemsAndSendWebhook(1).finally(async () => {

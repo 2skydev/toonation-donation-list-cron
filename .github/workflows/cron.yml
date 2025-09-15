@@ -23,3 +23,8 @@ jobs:
       
       - name: Run main.ts
         run: deno -A main.ts
+        env:
+          TOONATION_ID: ${{ secrets.TOONATION_ID }}
+          TOONATION_PASSWORD: ${{ secrets.TOONATION_PASSWORD }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}

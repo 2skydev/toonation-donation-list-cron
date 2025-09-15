@@ -19,7 +19,7 @@ jobs:
           deno-version: v2.x
       
       - name: Install Playwright
-        run: deno run -A playwright install chromium --with-deps --only-shell
+        run: deno run -A playwright install chromium --only-shell
       
       - name: Run main.ts
         run: deno -A main.ts

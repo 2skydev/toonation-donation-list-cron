@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: '0 0-14 * * *' # KST 09:00 ~ 23:00
     - cron: '0 15-18 * * *' # KST 00:00 ~ 03:00
+  workflow_dispatch:
 
 jobs:
   cron:

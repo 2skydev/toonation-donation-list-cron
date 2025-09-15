@@ -2,6 +2,8 @@
 
 투네이션 스트리머 계정의 후원 내역을 수집해 지정한 Webhook으로 전달하는 Deno 스크립트입니다. 크론 환경에서 주기적으로 실행하도록 설계되었습니다.
 
+<img width="1338" height="800" alt="image" src="https://github.com/user-attachments/assets/ee4df2ce-5a95-47c1-a615-43a963b1b972" />
+
 ## 주요 기능
 - **자동 로그인**: Playwright를 사용해 `toon.at` 스트리머 대시보드에 로그인합니다.
 - **후원 목록 수집**: 투네이션 내부 API(`dapi/streamer/donation_list`)를 호출하여 지정 기간(기본 2016-01-01부터 오늘까지)의 후원 내역을 페이지네이션하며 수집합니다.

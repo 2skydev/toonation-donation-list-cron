@@ -18,6 +18,9 @@ const donationItems: ToonationDonationItem[] = [];
 const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
   donationItems.push(...await getDonationItems(page, pageNumber));
 
+  console.info('크롤링된 후원 아이템 개수:', donationItems.length);
+  console.info('최근 후원 시간:', donationItems[0].createdAt);
+
   const response = await fetch(config.webhook.url, {
     method: 'POST',
     headers: {

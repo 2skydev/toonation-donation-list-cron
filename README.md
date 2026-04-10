@@ -43,7 +43,7 @@ deno task dev
 - **TOONATION_ID**: 투네이션 스트리머 계정 아이디
 - **TOONATION_PASSWORD**: 투네이션 스트리머 계정 비밀번호
 - **WEBHOOK_URL**: 후원 데이터 배열을 수신할 Webhook 엔드포인트 URL
-- **WEBHOOK_SECRET**: 요청 헤더 `X-Webhook-Secret`에 포함될 비밀값
+- **WEBHOOK_SECRET**: 웹훅 서명(HMAC-SHA256) 생성/검증에 사용할 비밀값
 
 `.env` 예시:
 
@@ -58,7 +58,8 @@ WEBHOOK_SECRET=your_webhook_secret
 - **HTTP 메서드**: `POST`
 - **헤더**:
   - `Content-Type: application/json`
-  - `X-Webhook-Secret: <WEBHOOK_SECRET>`
+  - `X-Signature-Timestamp: <unix timestamp seconds>`
+  - `X-Signature-Sha256: <hex hmac sha256>`
 - **본문(payload)**: `ToonationDonationItem[]` 배열
 
 `ToonationDonationItem` 타입:
@@ -90,6 +91,73 @@ interface ToonationDonationItem {
 응답 요구사항:
 - 정상 처리 시 2xx를 반환하십시오.
 - 추가 페이지 탐색이 필요하면 `404` 상태 코드와 본문 텍스트로 정확히 `not-found-last-donation`을 반환하십시오. 그러면 스크립트가 다음 페이지를 조회합니다.
+
+## Webhook 수신 서버 서명 검증 가이드
+수신 서버는 아래 순서대로 서명을 검증하면 됩니다.
+
+1. 요청의 raw body 문자열을 그대로 읽습니다.
+2. 헤더 `X-Signature-Timestamp`, `X-Signature-Sha256`가 모두 존재하는지 확인합니다.
+3. `X-Signature-Timestamp`를 정수로 파싱하고, 현재 시각과의 차이가 허용 범위(예: 300초) 이내인지 확인합니다.
+4. `expected = HMAC_SHA256_HEX(WEBHOOK_SECRET, timestamp + rawBody)`를 계산합니다.
+5. 수신한 `X-Signature-Sha256`와 constant-time 비교로 일치 여부를 확인합니다.
+6. 통과 후에만 raw body를 JSON으로 파싱해 비즈니스 로직을 수행합니다.
+
+### Node.js(Express) 예시
+```typescript
+import crypto from 'node:crypto';
+import express from 'express';
+
+const app = express();
+
+// 반드시 raw body가 필요합니다.
+app.use('/toonation/webhook', express.text({ type: 'application/json' }));
+
+const SKEW_SECONDS = 300;
+const SECRET = process.env.WEBHOOK_SECRET!;
+
+app.post('/toonation/webhook', (req, res) => {
+  const rawBody = req.body as string;
+  const timestamp = req.header('X-Signature-Timestamp');
+  const signature = req.header('X-Signature-Sha256');
+
+  if (!timestamp || !signature) {
+    return res.status(401).send('missing-signature-headers');
+  }
+
+  const ts = Number.parseInt(timestamp, 10);
+  if (!Number.isFinite(ts)) {
+    return res.status(401).send('invalid-timestamp');
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (Math.abs(nowSec - ts) > SKEW_SECONDS) {
+    return res.status(401).send('timestamp-out-of-range');
+  }
+
+  const expectedHex = crypto
+    .createHmac('sha256', SECRET)
+    .update(`${ts}${rawBody}`, 'utf8')
+    .digest('hex');
+
+  const expected = Buffer.from(expectedHex, 'hex');
+  const received = Buffer.from(signature, 'hex');
+
+  if (
+    expected.length !== received.length ||
+    !crypto.timingSafeEqual(expected, received)
+  ) {
+    return res.status(401).send('invalid-signature');
+  }
+
+  const payload = JSON.parse(rawBody);
+  // TODO: payload 처리
+  return res.status(200).send('ok');
+});
+```
+
+참고:
+- JSON 파서를 먼저 붙이면 raw body가 바뀌어 서명 검증에 실패할 수 있습니다. 반드시 raw body 기준으로 검증하세요.
+- `WEBHOOK_SECRET`은 GitHub Actions의 비밀 변수와 수신 서버가 동일해야 합니다.
 
 ## 스케줄 실행(GitHub Actions)
 이 프로젝트는 GitHub Actions 워크플로우로 스케줄 실행됩니다. 설정은 `.github/workflows/cron.yml` 에 정의되어 있습니다.
@@ -159,5 +227,5 @@ jobs:
 ## 트러블슈팅
 - **로그인 실패**: `TOONATION_ID`, `TOONATION_PASSWORD`를 확인하세요. 캡차/2단계 인증이 필요한 계정은 지원하지 않을 수 있습니다.
 - **브라우저 다운로드 실패**: 네트워크/권한 문제로 Playwright가 Chromium을 받지 못할 수 있습니다. 재시도하거나 네트워크 정책을 확인하세요.
-- **Webhook 401/403**: `X-Webhook-Secret` 불일치일 수 있습니다. Webhook 서버와 Repository의 Secret 값을 일치시키세요.
+- **Webhook 401/403**: `X-Signature-*` 검증 실패일 수 있습니다. `WEBHOOK_SECRET`, raw body 사용 여부, 타임스탬프 허용 범위를 확인하세요.
 - **404 반환 후 스크립트 종료**: Webhook이 본문으로 `not-found-last-donation` 외 다른 문자열을 반환하면 스크립트가 에러로 간주합니다. 처리 로직을 점검하세요.

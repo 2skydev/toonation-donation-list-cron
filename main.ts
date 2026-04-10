@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { getDonationItems } from './toonation.ts';
 import { config } from './config.ts';
 import { ToonationDonationItem } from './types.ts';
+import { sendSignedWebhook } from './webhook.ts';
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ locale: 'ko-KR' });
@@ -21,19 +22,16 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
   console.info('크롤링된 후원 아이템 개수:', donationItems.length);
   console.info('최근 후원 시간:', donationItems[0].createdAt);
 
-  const response = await fetch(config.webhook.url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Webhook-Secret': config.webhook.secret,
-    },
-    body: JSON.stringify(donationItems),
-  });
+  const response = await sendSignedWebhook(
+    config.webhook.url,
+    config.webhook.secret,
+    donationItems,
+  );
 
   if (response.status === 404) {
     const text = await response.text();
 
-    if (await response.text() === 'not-found-last-donation') {
+    if (text === 'not-found-last-donation') {
       console.log(
         `webhook에서 not-found-last-donation를 받았습니다. 다음 페이지를 포함하여 탐색합니다. (pageNumber: ${pageNumber})`,
       );
@@ -47,16 +45,18 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
   }
 
   if (!response.ok) {
+    const errText = await response.text();
     console.error('webhook에서 오류 응답을 받았습니다.');
-    console.error(`[${response.status}]`, await response.text());
-    throw new Error(await response.text());
+    console.error(`[${response.status}]`, errText);
+    throw new Error(errText);
   }
 
+  const okText = await response.text();
   console.log(
     `webhook에서 성공적으로 응답을 받았습니다. (pageNumber: ${pageNumber})`,
   );
 
-  console.log(`[${response.status}]`, await response.text());
+  console.log(`[${response.status}]`, okText);
 };
 
 await getDonationItemsAndSendWebhook(1).finally(async () => {

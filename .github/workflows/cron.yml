@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       CLOAKBROWSER_AUTO_UPDATE: 'false'
-      CLOAKBROWSER_CACHE_DIR: ${{ runner.temp }}/cloakbrowser
+      CLOAKBROWSER_CACHE_DIR: ${{ github.workspace }}/.cache/cloakbrowser
     steps:
       - name: Checkout
         uses: actions/checkout@v6

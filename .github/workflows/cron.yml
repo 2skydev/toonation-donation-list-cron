@@ -8,7 +8,10 @@ on:
 
 jobs:
   cron:
-    runs-on: ubuntu-24.04
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
     env:
       CLOAKBROWSER_AUTO_UPDATE: 'false'
       CLOAKBROWSER_CACHE_DIR: ${{ github.workspace }}/.cache/cloakbrowser
@@ -38,7 +41,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ steps.browser.outputs.path }}
-          key: cloakbrowser-ubuntu-24.04-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
+          key: cloakbrowser-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
 
       - name: Download CloakBrowser
         run: |

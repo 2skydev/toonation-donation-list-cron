@@ -4,7 +4,7 @@ import { config } from './config.ts';
 import { ToonationDonationItem } from './types.ts';
 import { sendSignedWebhook } from './webhook.ts';
 
-const browser = await launch();
+const browser = await launch({ headless: false, humanize: true });
 const context = await browser.newContext({ locale: 'ko-KR' });
 const page = await context.newPage();
 

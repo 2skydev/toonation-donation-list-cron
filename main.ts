@@ -4,14 +4,14 @@ import { config } from './config.ts';
 import { ToonationDonationItem } from './types.ts';
 import { sendSignedWebhook } from './webhook.ts';
 
-const browser = await launch();
+const browser = await launch({ humanize: true });
 const context = await browser.newContext({ locale: 'ko-KR' });
 const page = await context.newPage();
 
 await page.goto('https://toon.at/streamer/login');
 await page.getByPlaceholder('아이디 입력').fill(config.toonation.id);
 await page.getByPlaceholder('패스워드 입력').fill(config.toonation.password);
-await page.getByRole('button', { name: '로그인' }).click();
+await page.getByText('로그인', { exact: true }).click();
 await page.waitForURL('**/dashboard');
 
 const donationItems: ToonationDonationItem[] = [];

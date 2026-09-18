@@ -8,7 +8,10 @@ on:
 
 jobs:
   cron:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      CLOAKBROWSER_AUTO_UPDATE: 'false'
+      CLOAKBROWSER_CACHE_DIR: ${{ runner.temp }}/cloakbrowser
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -18,11 +21,43 @@ jobs:
         with:
           deno-version: v2.7.11
       
-      - name: Install Playwright
-        run: deno run -A playwright install chromium --only-shell
-      
+      - name: Install dependencies
+        run: deno install --frozen
+
+      - name: Resolve browser version
+        id: browser
+        run: |
+          deno eval --frozen '
+            import { binaryInfo } from "cloakbrowser";
+            const { version, cacheDir } = binaryInfo();
+            await Deno.writeTextFile(Deno.env.get("GITHUB_OUTPUT"), `version=${version}\npath=${cacheDir}\n`, { append: true });
+            await Deno.writeTextFile(Deno.env.get("GITHUB_ENV"), `CLOAKBROWSER_VERSION=${version}\n`, { append: true });
+          '
+
+      - name: Cache CloakBrowser
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.browser.outputs.path }}
+          key: cloakbrowser-ubuntu-24.04-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
+
+      - name: Download CloakBrowser
+        run: |
+          deno eval --frozen '
+            import { ensureBinary } from "cloakbrowser";
+            console.log(await ensureBinary());
+          '
+
+      - name: Check browser launch
+        run: |
+          deno eval --frozen '
+            import { launch } from "cloakbrowser";
+            const browser = await launch();
+            console.log(await browser.version());
+            await browser.close();
+          '
+
       - name: Run main.ts
-        run: deno -A main.ts
+        run: deno run --frozen -A main.ts
         env:
           TOONATION_ID: ${{ secrets.TOONATION_ID }}
           TOONATION_PASSWORD: ${{ secrets.TOONATION_PASSWORD }}

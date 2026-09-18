@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { Page } from 'playwright-core';
 import { transformDonationJson } from './utils.ts';
 import { ToonationApiGetDonationListResponse } from './types.ts';
 

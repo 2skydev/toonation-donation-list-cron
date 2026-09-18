@@ -1,10 +1,10 @@
-import { chromium } from 'playwright';
+import { launch } from 'cloakbrowser';
 import { getDonationItems } from './toonation.ts';
 import { config } from './config.ts';
 import { ToonationDonationItem } from './types.ts';
 import { sendSignedWebhook } from './webhook.ts';
 
-const browser = await chromium.launch();
+const browser = await launch();
 const context = await browser.newContext({ locale: 'ko-KR' });
 const page = await context.newPage();
 

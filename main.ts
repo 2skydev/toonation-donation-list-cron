@@ -4,7 +4,13 @@ import { config } from './config.ts';
 import { ToonationDonationItem } from './types.ts';
 import { sendSignedWebhook } from './webhook.ts';
 
-const browser = await launch({ humanize: true });
+const browser = await launch({
+  humanize: true,
+  proxy: {
+    server: 'socks5://127.0.0.1:1080',
+  },
+});
+
 const context = await browser.newContext({ locale: 'ko-KR' });
 const page = await context.newPage();
 

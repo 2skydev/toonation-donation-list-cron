@@ -8,7 +8,7 @@ on:
 
 jobs:
   cron:
-    runs-on: windows-2025
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ steps.browser.outputs.path }}
-          key: cloakbrowser-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
+          key: cloakbrowser-ubuntu-24.04-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
 
       - name: Download CloakBrowser
         run: |
@@ -58,6 +58,32 @@ jobs:
             console.log(await browser.version());
             await browser.close();
           '
+
+      - name: Start NetBird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
+        run: |
+          docker run --detach \
+            --name netbird \
+            --hostname "gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --publish 127.0.0.1:1080:1080 \
+            --env NB_SETUP_KEY \
+            --env NB_USE_NETSTACK_MODE=true \
+            --env NB_NETSTACK_SKIP_PROXY=false \
+            --env NB_SOCKS5_LISTENER_ADDRESS=0.0.0.0 \
+            --env NB_SOCKS5_LISTENER_PORT=1080 \
+            netbirdio/netbird:0.79.0-rootless
+
+          for attempt in {1..5}; do
+            if docker exec netbird netbird status --check ready >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "::error::NetBird connection timed out."
+          exit 1
+
 
       - name: Run main.ts
         run: deno run --frozen -A main.ts

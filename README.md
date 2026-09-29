@@ -1,6 +1,6 @@
 # 투네이션 후원 목록 자동 수집
 
-투네이션 후원 내역을 수집해 Webhook으로 전송하는 Deno 스크립트입니다. GitHub Actions에서 정기 실행하며, 브라우저 요청은 Android의 집 Wi-Fi를 경유합니다.
+투네이션 후원 내역을 수집해 Webhook으로 전송하는 Deno 스크립트입니다. GitHub Actions에서 정기 실행하며, 브라우저 요청은 집 네트워크의 NetBird Exit Node를 경유합니다.
 
 - **세션 재사용**: 저장된 브라우저 프로필을 사용하고, 세션이 만료되면 다시 로그인합니다.
 - **후원 수집**: 2016-01-01부터 오늘까지의 내역을 페이지별로 조회합니다.
@@ -30,14 +30,14 @@ flowchart TB
     end
 
     subgraph home["집 네트워크"]
-        android["Android NetBird<br/>Exit Node"]
-        wifi["Wi-Fi 공유기<br/>집 공인 IP"]
-        android --> wifi
+        exitNode["NetBird Exit Node<br/>상시 켜진 기기"]
+        router["공유기 · 유선 또는 Wi-Fi<br/>집 공인 IP"]
+        exitNode --> router
     end
 
     trigger -.-> prepare
-    proxy -->|"암호화 연결"| android
-    wifi --> toon["투네이션"]
+    proxy -->|"암호화 연결"| exitNode
+    router --> toon["투네이션"]
     send -->|"HTTP(S) POST"| webhook["Webhook 서버"]
 ```
 
@@ -45,14 +45,14 @@ flowchart TB
 
 ## 설정
 
-### 1. NetBird와 Android
+### 1. NetBird Exit Node
 
-Android와 실행 환경을 같은 NetBird 네트워크에 등록합니다.
+계속 켜둘 수 있고 NetBird Exit Node를 지원하는 기기라면 사용할 수 있습니다. Android는 한 가지 예시이며, 집에서 사용하는 PC나 미니 PC 등으로 대체할 수 있습니다. 집 공인 IP로 접속하려면 해당 기기를 집 네트워크에 연결합니다.
 
-1. Android에 NetBird를 설치하고 집 Wi-Fi에 연결합니다. 크론 실행 중 Wi-Fi와 NetBird 연결을 유지하도록 백그라운드 실행을 허용합니다.
-2. Android용 `android-exit`, 실행 환경용 `github-actions` 그룹을 만듭니다.
-3. `github-actions` → `android-exit` 단방향 ICMP 허용 정책을 설정합니다.
-4. Android를 `android-exit`에 넣고, `Peers` → `Add Exit Node`에서 다음을 설정합니다.
+1. Exit Node로 사용할 기기와 실행 환경을 같은 NetBird 네트워크에 등록합니다. 크론 실행 중 절전이나 백그라운드 제한으로 연결이 끊기지 않도록 설정합니다.
+2. Exit Node용 `exit-nodes`, 실행 환경용 `github-actions` 그룹을 만듭니다. 그룹 이름은 예시입니다.
+3. `github-actions` → `exit-nodes` 단방향 ICMP 허용 정책을 설정합니다.
+4. 해당 기기를 `exit-nodes`에 넣고, `Peers` → `Add Exit Node`에서 다음을 설정합니다.
    - Distribution Groups: `github-actions`
    - Auto Apply: 활성화
    - Masquerade: 활성화
@@ -138,7 +138,7 @@ docker exec netbird-local netbird status
 docker exec netbird-local netbird networks ls
 ```
 
-Android Exit Node 경로가 선택되어 있으면 프로젝트 폴더에서 실행합니다. 필요한 의존성과 브라우저는 첫 실행 시 자동으로 다운로드됩니다.
+설정한 Exit Node 경로가 선택되어 있으면 프로젝트 폴더에서 실행합니다. 필요한 의존성과 브라우저는 첫 실행 시 자동으로 다운로드됩니다.
 
 ```bash
 deno task start
@@ -203,11 +203,11 @@ HMAC_SHA256_HEX(WEBHOOK_SECRET, timestamp + rawBody)
 | --- | --- |
 | `ERR_PROXY_CONNECTION_FAILED` | `127.0.0.1:1080` 프록시 실행 여부 |
 | `NetBird login failed` | Setup Key 만료·폐기·사용 횟수 제한 |
-| NetBird 연결 후 요청 실패 | Android Wi-Fi, Exit Node 경로 선택, 그룹과 접근 정책 |
+| NetBird 연결 후 요청 실패 | Exit Node 기기의 네트워크 연결, 경로 선택, 그룹과 접근 정책 |
 | 로그인 실패·화면 대기 초과 | 계정 정보, 캡차·2단계 인증, 페이지 구조 변경 |
 | Webhook 401/403 | 공유 서명 키, 원본 본문, 타임스탬프 |
 
-집 공인 IP는 같은 SOCKS5 프록시를 지정해 별도로 확인하세요. Actions의 통신 검사는 IP를 비교하지 않으며, Android와 같은 Wi-Fi에서 테스트하면 직접 연결도 같은 IP를 사용합니다.
+집 공인 IP는 같은 SOCKS5 프록시를 지정해 별도로 확인하세요. Actions의 통신 검사는 IP를 비교하지 않으며, Exit Node와 같은 집 네트워크에서 테스트하면 직접 연결도 같은 IP를 사용합니다.
 
 <details>
 <summary>로그와 주요 파일</summary>

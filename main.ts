@@ -5,27 +5,38 @@ import { ToonationDonationItem } from './types.ts';
 import { sendSignedWebhook } from './webhook.ts';
 
 const context = await launchPersistentContext({
+  headless: false,
   humanize: true,
-  proxy: 'socks5://127.0.0.1:1080',
+  // proxy: 'socks5://127.0.0.1:1080',
   locale: 'ko-KR',
   timezone: 'Asia/Seoul',
   userDataDir: './.cache/toonation-profile',
-  args: [
-    '--fingerprint=1212',
-  ],
+  // args: [
+  //   // '--fingerprint=1212',
+  // ],
 });
 
 const page = await context.newPage();
 
 await page.goto('https://toon.at/streamer/dashboard');
 
+const loginInput = page.getByPlaceholder('아이디 입력');
+const dashboardHeader = page.locator('header[class*="_RouteDashboardHeader_"]');
+
+// 페이지 로드 이후 진행되는 인증 확인과 화면 렌더링을 기다립니다.
+await loginInput.or(dashboardHeader).first().waitFor({ timeout: 10000 });
+
 if (new URL(page.url()).pathname === '/streamer/login') {
-  await page.getByPlaceholder('아이디 입력').fill(config.toonation.id);
+  await loginInput.fill(config.toonation.id);
   await page.getByPlaceholder('패스워드 입력').fill(config.toonation.password);
-  await page.getByLabel('로그인 상태 유지').check();
+  if (!await page.getByLabel('로그인 상태 유지').isChecked()) {
+    await page.getByText('로그인 상태 유지', { exact: true }).click();
+  }
   await page.getByText('로그인', { exact: true }).click();
   await page.waitForURL('**/dashboard');
 }
+
+await dashboardHeader.waitFor({ timeout: 10000 });
 
 const donationItems: ToonationDonationItem[] = [];
 

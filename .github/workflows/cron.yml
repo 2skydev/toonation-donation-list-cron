@@ -80,9 +80,17 @@ jobs:
           tar -xzf $archivePath -C $netbirdDir netbird.exe
           if ($LASTEXITCODE -ne 0) { throw 'NetBird extraction failed.' }
 
-      - name: Start NetBird
+      - name: Cache browser profile
+        uses: actions/cache@v6
+        with:
+          path: .cache/toonation-profile
+          key: toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-
+
+      - name: Run main.ts with NetBird
         shell: pwsh
-        timeout-minutes: 3
+        timeout-minutes: 10
         env:
           NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
           NB_STATE_DIR: ${{ runner.temp }}/netbird/state
@@ -93,6 +101,10 @@ jobs:
           NB_NETSTACK_SKIP_PROXY: 'false'
           NB_SOCKS5_LISTENER_ADDRESS: '127.0.0.1'
           NB_SOCKS5_LISTENER_PORT: '1080'
+          TOONATION_ID: ${{ secrets.TOONATION_ID }}
+          TOONATION_PASSWORD: ${{ secrets.TOONATION_PASSWORD }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: |
           $netbirdDir = Join-Path $env:RUNNER_TEMP 'netbird'
           $netbirdExe = Join-Path $netbirdDir 'netbird.exe'
@@ -100,63 +112,39 @@ jobs:
           $daemon = Start-Process -FilePath $netbirdExe -ArgumentList 'service', 'run' -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput (Join-Path $netbirdDir 'service.log') `
             -RedirectStandardError (Join-Path $netbirdDir 'service-error.log')
-          Set-Content (Join-Path $netbirdDir 'service.pid') $daemon.Id
-
-          for ($attempt = 0; $attempt -lt 10; $attempt++) {
-            if ($daemon.HasExited) { throw 'NetBird daemon exited before startup.' }
-            & $netbirdExe status --check live *> $null
-            if ($LASTEXITCODE -eq 0) { break }
-            Start-Sleep -Seconds 1
-          }
-          if ($LASTEXITCODE -ne 0) { throw 'NetBird daemon startup timed out.' }
-          & $netbirdExe up --hostname "gha-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          if ($LASTEXITCODE -ne 0) { throw 'NetBird login failed.' }
-
-          for ($attempt = 0; $attempt -lt 10; $attempt++) {
-            if ($daemon.HasExited) { throw 'NetBird daemon exited before connecting.' }
-            & $netbirdExe status --check ready *> $null
-            if ($LASTEXITCODE -eq 0) {
-              $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 1080 -State Listen -ErrorAction SilentlyContinue
-              if ($listener) { exit 0 }
+          try {
+            for ($attempt = 0; $attempt -lt 10; $attempt++) {
+              if ($daemon.HasExited) { throw 'NetBird daemon exited before startup.' }
+              & $netbirdExe status --check live *> $null
+              if ($LASTEXITCODE -eq 0) { break }
+              Start-Sleep -Seconds 1
             }
-            Start-Sleep -Seconds 2
-          }
-          throw 'NetBird connection timed out.'
+            if ($LASTEXITCODE -ne 0) { throw 'NetBird daemon startup timed out.' }
+            & $netbirdExe up --hostname "gha-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            if ($LASTEXITCODE -ne 0) { throw 'NetBird login failed.' }
 
-      - name: Cache browser profile
-        uses: actions/cache@v6
-        with:
-          path: .cache/toonation-profile
-          key: toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 10; $attempt++) {
+              if ($daemon.HasExited) { throw 'NetBird daemon exited before connecting.' }
+              & $netbirdExe status --check ready *> $null
+              if ($LASTEXITCODE -eq 0) {
+                $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 1080 -State Listen -ErrorAction SilentlyContinue
+                if ($listener) {
+                  $ready = $true
+                  break
+                }
+              }
+              Start-Sleep -Seconds 2
+            }
+            if (-not $ready) { throw 'NetBird connection timed out.' }
 
-      - name: Check NetBird proxy
-        shell: pwsh
-        run: |
-          $netbirdPid = [int](Get-Content (Join-Path $env:RUNNER_TEMP 'netbird/service.pid'))
-          if (-not (Get-Process -Id $netbirdPid -ErrorAction SilentlyContinue)) {
-            throw 'NetBird daemon stopped between steps.'
-          }
-          curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 10 --max-time 30 `
-            --silent --show-error --output NUL --write-out "Proxy check HTTP status: %{http_code}\n" `
-            https://toon.at/streamer/dashboard
-          if ($LASTEXITCODE -ne 0) { throw "NetBird SOCKS5 request failed (curl exit code: $LASTEXITCODE)." }
+            curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 10 --max-time 30 `
+              --silent --show-error --output NUL --write-out "Proxy check HTTP status: %{http_code}\n" `
+              https://toon.at/streamer/dashboard
+            if ($LASTEXITCODE -ne 0) { throw "NetBird SOCKS5 request failed (curl exit code: $LASTEXITCODE)." }
 
-      - name: Run main.ts
-        run: deno run --frozen -A main.ts
-        env:
-          TOONATION_ID: ${{ secrets.TOONATION_ID }}
-          TOONATION_PASSWORD: ${{ secrets.TOONATION_PASSWORD }}
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-
-      - name: Stop NetBird
-        if: always()
-        shell: pwsh
-        run: |
-          $pidFile = Join-Path $env:RUNNER_TEMP 'netbird/service.pid'
-          if (Test-Path $pidFile) {
-            $netbirdPid = [int](Get-Content $pidFile)
-            Stop-Process -Id $netbirdPid -ErrorAction SilentlyContinue
+            deno run --frozen -A main.ts
+            if ($LASTEXITCODE -ne 0) { throw "Crawling failed (Deno exit code: $LASTEXITCODE)." }
+          } finally {
+            Stop-Process -Id $daemon.Id -ErrorAction SilentlyContinue
           }

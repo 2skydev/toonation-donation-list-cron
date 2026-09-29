@@ -94,7 +94,7 @@ WEBHOOK_SECRET=your_webhook_secret
 
 | 항목 | 설정 |
 | --- | --- |
-| 정기 실행 | KST 00~03시, 09~23시 매 시 정각 |
+| 정기 실행 | KST 00-03시, 09-23시 매 시 정각 |
 | 실행 환경 | Windows 2025, Deno 2.7.11 |
 | 프록시 | NetBird 0.79.0 직접 실행 · netstack SOCKS5 |
 | 캐시 | 브라우저 바이너리와 로그인 프로필 재사용 |

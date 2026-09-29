@@ -1,24 +1,31 @@
-import { launch } from 'cloakbrowser';
+import { launchPersistentContext } from 'cloakbrowser';
 import { getDonationItems } from './toonation.ts';
 import { config } from './config.ts';
 import { ToonationDonationItem } from './types.ts';
 import { sendSignedWebhook } from './webhook.ts';
 
-const browser = await launch({
+const context = await launchPersistentContext({
   humanize: true,
-  proxy: {
-    server: 'socks5://127.0.0.1:1080',
-  },
+  proxy: 'socks5://127.0.0.1:1080',
+  locale: 'ko-KR',
+  timezone: 'Asia/Seoul',
+  userDataDir: './.cache/toonation-profile',
+  args: [
+    '--fingerprint=1212',
+  ],
 });
 
-const context = await browser.newContext({ locale: 'ko-KR' });
 const page = await context.newPage();
 
-await page.goto('https://toon.at/streamer/login');
-await page.getByPlaceholder('아이디 입력').fill(config.toonation.id);
-await page.getByPlaceholder('패스워드 입력').fill(config.toonation.password);
-await page.getByText('로그인', { exact: true }).click();
-await page.waitForURL('**/dashboard');
+await page.goto('https://toon.at/streamer/dashboard');
+
+if (new URL(page.url()).pathname === '/streamer/login') {
+  await page.getByPlaceholder('아이디 입력').fill(config.toonation.id);
+  await page.getByPlaceholder('패스워드 입력').fill(config.toonation.password);
+  await page.getByLabel('로그인 상태 유지').check();
+  await page.getByText('로그인', { exact: true }).click();
+  await page.waitForURL('**/dashboard');
+}
 
 const donationItems: ToonationDonationItem[] = [];
 
@@ -66,5 +73,5 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
 };
 
 await getDonationItemsAndSendWebhook(1).finally(async () => {
-  await browser.close();
+  await context.close();
 });

@@ -8,7 +8,7 @@ on:
 
 jobs:
   cron:
-    runs-on: ubuntu-24.04
+    runs-on: windows-2025
     defaults:
       run:
         shell: bash
@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ steps.browser.outputs.path }}
-          key: cloakbrowser-ubuntu-24.04-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
+          key: cloakbrowser-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
 
       - name: Download CloakBrowser
         run: |
@@ -59,31 +59,77 @@ jobs:
             await browser.close();
           '
 
+      - name: Install NetBird
+        shell: pwsh
+        run: |
+          $netbirdDir = Join-Path $env:RUNNER_TEMP 'netbird'
+          New-Item -ItemType Directory -Path $netbirdDir -Force | Out-Null
+          $archive = 'netbird_0.79.0_windows_amd64.tar.gz'
+          $releaseUrl = 'https://github.com/netbirdio/netbird/releases/download/v0.79.0'
+          $archivePath = Join-Path $netbirdDir $archive
+          $checksumsPath = Join-Path $netbirdDir 'checksums.txt'
+          Invoke-WebRequest "$releaseUrl/$archive" -OutFile $archivePath
+          Invoke-WebRequest "$releaseUrl/netbird_0.79.0_checksums.txt" -OutFile $checksumsPath
+
+          $checksumLine = Get-Content $checksumsPath | Where-Object { ($_ -split '\s+')[1] -eq $archive }
+          if (-not $checksumLine) { throw 'NetBird checksum not found.' }
+          $expectedHash = ($checksumLine -split '\s+')[0]
+          if ((Get-FileHash $archivePath -Algorithm SHA256).Hash -ne $expectedHash) {
+            throw 'NetBird checksum mismatch.'
+          }
+          tar -xzf $archivePath -C $netbirdDir netbird.exe
+          if ($LASTEXITCODE -ne 0) { throw 'NetBird extraction failed.' }
+
       - name: Start NetBird
+        shell: pwsh
+        timeout-minutes: 3
         env:
           NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
+          NB_STATE_DIR: ${{ runner.temp }}/netbird/state
+          NB_CONFIG: ${{ runner.temp }}/netbird/state/default.json
+          NB_DAEMON_ADDR: npipe://netbird-cron
+          NB_LOG_FILE: ${{ runner.temp }}/netbird/client.log
+          NB_USE_NETSTACK_MODE: 'true'
+          NB_NETSTACK_SKIP_PROXY: 'false'
+          NB_SOCKS5_LISTENER_ADDRESS: '127.0.0.1'
+          NB_SOCKS5_LISTENER_PORT: '1080'
         run: |
-          docker run --detach \
-            --name netbird \
-            --hostname "gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-            --publish 127.0.0.1:1080:1080 \
-            --env NB_SETUP_KEY \
-            --env NB_USE_NETSTACK_MODE=true \
-            --env NB_NETSTACK_SKIP_PROXY=false \
-            --env NB_SOCKS5_LISTENER_ADDRESS=0.0.0.0 \
-            --env NB_SOCKS5_LISTENER_PORT=1080 \
-            netbirdio/netbird:0.79.0-rootless
+          $netbirdDir = Join-Path $env:RUNNER_TEMP 'netbird'
+          $netbirdExe = Join-Path $netbirdDir 'netbird.exe'
+          New-Item -ItemType Directory -Path $env:NB_STATE_DIR -Force | Out-Null
+          $daemon = Start-Process -FilePath $netbirdExe -ArgumentList 'service', 'run' -PassThru -NoNewWindow `
+            -RedirectStandardOutput (Join-Path $netbirdDir 'service.log') `
+            -RedirectStandardError (Join-Path $netbirdDir 'service-error.log')
+          Set-Content (Join-Path $netbirdDir 'service.pid') $daemon.Id
 
-          for attempt in {1..5}; do
-            if docker exec netbird netbird status --check ready >/dev/null 2>&1; then
-              exit 0
-            fi
-            sleep 2
-          done
+          for ($attempt = 0; $attempt -lt 10; $attempt++) {
+            if ($daemon.HasExited) { throw 'NetBird daemon exited before startup.' }
+            & $netbirdExe status --check live *> $null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 1
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'NetBird daemon startup timed out.' }
+          & $netbirdExe up --hostname "gha-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if ($LASTEXITCODE -ne 0) { throw 'NetBird login failed.' }
 
-          echo "::error::NetBird connection timed out."
-          exit 1
+          for ($attempt = 0; $attempt -lt 10; $attempt++) {
+            if ($daemon.HasExited) { throw 'NetBird daemon exited before connecting.' }
+            & $netbirdExe status --check ready *> $null
+            if ($LASTEXITCODE -eq 0) {
+              $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 1080 -State Listen -ErrorAction SilentlyContinue
+              if ($listener) { exit 0 }
+            }
+            Start-Sleep -Seconds 2
+          }
+          throw 'NetBird connection timed out.'
 
+      - name: Cache browser profile
+        uses: actions/cache@v6
+        with:
+          path: .cache/toonation-profile
+          key: toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-
 
       - name: Run main.ts
         run: deno run --frozen -A main.ts
@@ -92,3 +138,13 @@ jobs:
           TOONATION_PASSWORD: ${{ secrets.TOONATION_PASSWORD }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+
+      - name: Stop NetBird
+        if: always()
+        shell: pwsh
+        run: |
+          $pidFile = Join-Path $env:RUNNER_TEMP 'netbird/service.pid'
+          if (Test-Path $pidFile) {
+            $netbirdPid = [int](Get-Content $pidFile)
+            Stop-Process -Id $netbirdPid -ErrorAction SilentlyContinue
+          }

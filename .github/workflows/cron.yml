@@ -97,7 +97,7 @@ jobs:
           $netbirdDir = Join-Path $env:RUNNER_TEMP 'netbird'
           $netbirdExe = Join-Path $netbirdDir 'netbird.exe'
           New-Item -ItemType Directory -Path $env:NB_STATE_DIR -Force | Out-Null
-          $daemon = Start-Process -FilePath $netbirdExe -ArgumentList 'service', 'run' -PassThru -NoNewWindow `
+          $daemon = Start-Process -FilePath $netbirdExe -ArgumentList 'service', 'run' -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput (Join-Path $netbirdDir 'service.log') `
             -RedirectStandardError (Join-Path $netbirdDir 'service-error.log')
           Set-Content (Join-Path $netbirdDir 'service.pid') $daemon.Id
@@ -130,6 +130,18 @@ jobs:
           key: toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-
+
+      - name: Check NetBird proxy
+        shell: pwsh
+        run: |
+          $netbirdPid = [int](Get-Content (Join-Path $env:RUNNER_TEMP 'netbird/service.pid'))
+          if (-not (Get-Process -Id $netbirdPid -ErrorAction SilentlyContinue)) {
+            throw 'NetBird daemon stopped between steps.'
+          }
+          curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 10 --max-time 30 `
+            --silent --show-error --output NUL --write-out "Proxy check HTTP status: %{http_code}\n" `
+            https://toon.at/streamer/dashboard
+          if ($LASTEXITCODE -ne 0) { throw "NetBird SOCKS5 request failed (curl exit code: $LASTEXITCODE)." }
 
       - name: Run main.ts
         run: deno run --frozen -A main.ts

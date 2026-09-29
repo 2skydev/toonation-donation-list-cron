@@ -1,96 +1,162 @@
-# 투네이션 후원 목록 자동 조회 크론 (CloakBrowser 크롤링)
+# 투네이션 후원 목록 자동 수집
 
-투네이션 스트리머 계정의 후원 내역을 수집해 지정한 Webhook으로 전달하는 Deno 스크립트입니다. 크론 환경에서 주기적으로 실행하도록 설계되었습니다.
+투네이션 후원 내역을 수집해 Webhook으로 전송하는 Deno 스크립트입니다. GitHub Actions에서 정기 실행하며, 브라우저 요청은 Android의 집 Wi-Fi를 경유합니다.
 
-<img width="1338" height="800" alt="image" src="https://github.com/user-attachments/assets/ee4df2ce-5a95-47c1-a615-43a963b1b972" />
+- **세션 재사용**: 저장된 브라우저 프로필을 사용하고, 세션이 만료되면 다시 로그인합니다.
+- **후원 수집**: 2016-01-01부터 오늘까지의 내역을 페이지별로 조회합니다.
+- **Webhook 전송**: 누적된 후원 목록에 HMAC 서명을 붙여 전송합니다.
 
-## 주요 기능
+## 동작 구조
 
-- **로그인 세션 재사용**: CloakBrowser의 영구 브라우저 프로필로 대시보드에 먼저 접근하고, 로그인 페이지로 이동한 경우에만 로그인합니다.
-- **프록시 연결**: 브라우저는 `socks5://127.0.0.1:1080`을 사용하며, GitHub Actions에서는 NetBird가 프록시를 제공합니다.
-- **후원 목록 수집**: 투네이션 내부 API(`dapi/streamer/donation_list`)를 호출하여 지정 기간(기본 2016-01-01부터 오늘까지)의 후원 내역을 페이지네이션하며 수집합니다.
-- **Webhook 전송**: 누적된 후원 아이템 배열을 Webhook URL로 POST 전송합니다.
-- **페이지 탐색 제어**: Webhook이 404 응답으로 `not-found-last-donation`을 반환하면 다음 페이지를 추가로 탐색합니다.
+점선은 실행 순서와 데이터 전달, 실선은 네트워크 요청입니다.
 
-## 동작 개요
+```mermaid
+flowchart TB
+    trigger["정기 실행 / 수동 실행"]
 
-1. CloakBrowser의 `launchPersistentContext()`로 `.cache/toonation-profile` 프로필을 엽니다. 한국어 로케일(`ko-KR`), 서울 시간대(`Asia/Seoul`), `humanize: true`, `headless: false`를 사용합니다.
-2. `https://toon.at/streamer/dashboard`로 이동하고 로그인 입력창 또는 대시보드 헤더가 표시될 때까지 기다립니다. 로그인 페이지라면 아이디/비밀번호를 입력하고, `로그인 상태 유지`가 꺼져 있을 때 라벨을 클릭한 뒤 로그인합니다.
-3. 대시보드 헤더가 표시되면 페이지 컨텍스트에서 `fetch(https://toon.at/dapi/streamer/donation_list?from&to&page)`로 데이터를 조회합니다. 화면 표시 대기 시간은 최대 10초입니다.
-4. 응답 리스트를 아래 스키마로 변환합니다.
-5. Webhook으로 POST 요청을 전송합니다. 404 + `not-found-last-donation`이면 다음 페이지를 재귀적으로 조회합니다.
+    subgraph runner["GitHub Actions · Windows"]
+        prepare["의존성 준비 · 캐시 복원"]
+        start["NetBird 시작 · 연결 확인"]
+        browser["CloakBrowser<br/>로그인 · 후원 목록 조회"]
+        send["Deno<br/>데이터 변환 · Webhook 서명"]
+        finish["NetBird 종료<br/>성공 시 캐시 저장"]
+        proxy["NetBird SOCKS5<br/>127.0.0.1:1080"]
 
-## 요구 사항
+        prepare -.-> start
+        start -.-> browser
+        browser -. "조회 결과" .-> send
+        send -. "처리 종료" .-> finish
+        browser --> proxy
+    end
 
-- Deno 설치(GitHub Actions에서는 `2.7.11` 사용)
-- 첫 실행 시 의존성과 CloakBrowser 브라우저를 다운로드할 수 있는 네트워크 및 쓰기 권한
-- `127.0.0.1:1080`에서 실행 중이며 `toon.at`에 연결할 수 있는 SOCKS5 프록시
-- Deno 실행 환경에서 Webhook 도메인 접근 가능(Webhook 요청은 브라우저 컨텍스트 외부에서 전송)
-- 현재 `headless: false` 설정으로 브라우저를 실행할 수 있는 환경
+    subgraph home["집 네트워크"]
+        android["Android NetBird<br/>Exit Node"]
+        wifi["Wi-Fi 공유기<br/>집 공인 IP"]
+        android --> wifi
+    end
 
-## 설치 및 실행
-1) 저장소 클론 후 아래 환경 변수 예시를 참고해 프로젝트 루트에 `.env` 파일을 생성합니다.
-
-2) 의존성과 브라우저를 준비합니다.
-
-```bash
-deno install --frozen
-deno eval --frozen 'import { ensureBinary } from "cloakbrowser"; console.log(await ensureBinary());'
+    trigger -.-> prepare
+    proxy -->|"암호화 연결"| android
+    wifi --> toon["투네이션"]
+    send -->|"HTTP(S) POST"| webhook["Webhook 서버"]
 ```
 
-`deno.json`에는 `cloakbrowser@0.5.10`과 페이지 타입에 사용하는 `playwright-core@1.55.0`이 지정되어 있습니다. 브라우저는 CloakBrowser의 `ensureBinary()`로 준비합니다.
+브라우저 요청에만 SOCKS5 프록시가 적용됩니다. Webhook은 Deno에서 직접 전송하며, Exit Node는 아래 NetBird 설정에서 지정합니다.
 
-3) 로컬에서 SOCKS5 프록시를 먼저 실행합니다. `deno task start`는 NetBird를 자동으로 시작하지 않습니다. 프록시 없이 실행하려면 `main.ts`의 `proxy` 설정을 제거해야 합니다.
+## 설정
 
-4) 스크립트를 실행합니다.
+### 1. NetBird와 Android
 
-```bash
-deno task start
-# 또는 파일 변경 감지 모드
-deno task dev
-```
+Android와 실행 환경을 같은 NetBird 네트워크에 등록합니다.
 
-`deno.json`에 설정된 태스크는 `.env`를 자동으로 로드합니다. 브라우저 프로필은 `.cache/toonation-profile`에 저장되며, 다음 실행에서 재사용합니다. 세션이 만료되어 로그인 페이지로 이동하면 다시 로그인합니다.
+1. Android에 NetBird를 설치하고 집 Wi-Fi에 연결합니다. 크론 실행 중 Wi-Fi와 NetBird 연결을 유지하도록 백그라운드 실행을 허용합니다.
+2. Android용 `android-exit`, 실행 환경용 `github-actions` 그룹을 만듭니다.
+3. `github-actions` → `android-exit` 단방향 ICMP 허용 정책을 설정합니다.
+4. Android를 `android-exit`에 넣고, `Peers` → `Add Exit Node`에서 다음을 설정합니다.
+   - Distribution Groups: `github-actions`
+   - Auto Apply: 활성화
+   - Masquerade: 활성화
+5. `Settings` → `Setup Keys`에서 키를 생성합니다.
+   - Type: `Reusable`
+   - Ephemeral Peers: 활성화
+   - Auto-assign groups: `github-actions`
 
-## 환경 변수
+Actions는 실행마다 새 피어를 등록하므로 키의 만료일과 사용 횟수 제한을 확인하세요. Ephemeral 피어는 10분 넘게 오프라인이면 자동 제거됩니다.
 
-- **TOONATION_ID**: 투네이션 스트리머 계정 아이디
-- **TOONATION_PASSWORD**: 투네이션 스트리머 계정 비밀번호
-- **WEBHOOK_URL**: 후원 데이터 배열을 수신할 Webhook 엔드포인트 URL
-- **WEBHOOK_SECRET**: 웹훅 서명(HMAC-SHA256) 생성/검증에 사용할 비밀값
+참고: [Exit Node 설정](https://docs.netbird.io/use-cases/remote-access/exit-nodes), [Setup Key 설정](https://docs.netbird.io/manage/peers/register-machines-using-setup-keys).
 
-GitHub Actions에서는 NetBird 연결용 리포지토리 시크릿 **NETBIRD_SETUP_KEY**도 필요합니다. 워크플로가 이를 `NB_SETUP_KEY`로 전달하며, 로컬 Deno 스크립트의 필수 환경 변수는 아닙니다.
+### 2. 환경 변수
 
-`.env` 예시:
+| 이름 | 용도 |
+| --- | --- |
+| `TOONATION_ID` | 투네이션 스트리머 계정 아이디 |
+| `TOONATION_PASSWORD` | 계정 비밀번호 |
+| `WEBHOOK_URL` | 후원 목록을 받을 URL |
+| `WEBHOOK_SECRET` | 수신 서버와 공유하는 HMAC 서명 키 |
+| `NETBIRD_SETUP_KEY` | Actions에서 NetBird에 등록할 Setup Key |
 
-```bash
+**GitHub Actions**에서는 저장소의 `Settings` → `Secrets and variables` → `Actions`에 위 5개 값을 등록합니다.
+
+**로컬 실행**에서는 프로젝트 루트에 `.env`를 만듭니다. Setup Key는 아래 Docker 실행 시 별도로 입력합니다.
+
+```dotenv
 TOONATION_ID=your_toonation_id
 TOONATION_PASSWORD=your_toonation_password
 WEBHOOK_URL=https://your.service.example.com/toonation/webhook
 WEBHOOK_SECRET=your_webhook_secret
 ```
 
-## Webhook
-- **HTTP 메서드**: `POST`
-- **헤더**:
-  - `Content-Type: application/json`
-  - `X-Signature-Timestamp: <unix timestamp seconds>`
-  - `X-Signature-Sha256: <hex hmac sha256>`
-- **본문(payload)**: `ToonationDonationItem[]` 배열
+## 실행
 
-`ToonationDonationItem` 타입:
+### GitHub Actions
 
-```typescript
-interface ToonationDonationItem {
-  account: string;
-  nickname: string;
-  amount: number;
-  message: string;
-  createdAt: string;
-}
+`Actions` → `Cron` → `Run workflow`로 수동 실행할 수 있습니다.
+
+| 항목 | 설정 |
+| --- | --- |
+| 정기 실행 | KST 00~03시, 09~23시 매 시 정각 |
+| 실행 환경 | Windows 2025, Deno 2.7.11 |
+| 프록시 | NetBird 0.79.0 직접 실행 · netstack SOCKS5 |
+| 캐시 | 브라우저 바이너리와 로그인 프로필 재사용 |
+| 제한 시간 | NetBird 연결과 크롤링 단계에 10분 |
+
+세부 설정은 [cron.yml](.github/workflows/cron.yml)에 있습니다. 프록시 통신 확인 후 크롤링을 시작하며, 종료 시 NetBird 프로세스를 정리합니다.
+
+### 로컬 실행(macOS + Docker)
+
+Deno와 Docker가 필요합니다. 브라우저는 Mac에서 화면을 표시하며 실행됩니다.
+
+**1. NetBird 프록시 시작**
+
+Docker를 실행한 뒤 zsh에서 Setup Key를 입력합니다.
+
+```zsh
+read -rs "NB_SETUP_KEY?NetBird Setup Key: "
+echo
+export NB_SETUP_KEY
+
+docker run --detach \
+  --name netbird-local \
+  --hostname toonation-local \
+  --publish 127.0.0.1:1080:1080 \
+  --env NB_SETUP_KEY \
+  --env NB_USE_NETSTACK_MODE=true \
+  --env NB_NETSTACK_SKIP_PROXY=false \
+  --env NB_SOCKS5_LISTENER_ADDRESS=0.0.0.0 \
+  --env NB_SOCKS5_LISTENER_PORT=1080 \
+  netbirdio/netbird:0.79.0-rootless
+
+unset NB_SETUP_KEY
 ```
 
-예시 페이로드:
+SOCKS5는 인증이 없으므로 호스트에는 `127.0.0.1:1080`으로만 공개합니다.
+
+**2. 연결 확인 후 수집 실행**
+
+```bash
+docker exec netbird-local netbird status
+docker exec netbird-local netbird networks ls
+```
+
+Android Exit Node 경로가 선택되어 있으면 프로젝트 폴더에서 실행합니다. 필요한 의존성과 브라우저는 첫 실행 시 자동으로 다운로드됩니다.
+
+```bash
+deno task start
+```
+
+`.env`를 읽어 후원 내역을 수집하고 Webhook으로 전송합니다. 로그인 프로필은 `.cache/toonation-profile`에 저장됩니다. 파일 변경 시 재실행하려면 `deno task dev`를 사용합니다.
+
+**3. 프록시 종료**
+
+```bash
+docker rm --force netbird-local
+```
+
+다시 사용할 때는 1번부터 실행합니다.
+
+## Webhook 연동
+
+`WEBHOOK_URL`로 아래 형식의 JSON 배열을 POST 전송합니다.
 
 ```json
 [
@@ -104,149 +170,56 @@ interface ToonationDonationItem {
 ]
 ```
 
-응답 요구사항:
-- 정상 처리 시 2xx를 반환하십시오.
-- 추가 페이지 탐색이 필요하면 `404` 상태 코드와 본문 텍스트로 정확히 `not-found-last-donation`을 반환하십시오. 그러면 스크립트가 다음 페이지를 조회합니다.
+| 응답 | 처리 |
+| --- | --- |
+| 2xx | 수집 종료 |
+| 404 + 본문 `not-found-last-donation` | 다음 페이지를 추가해 누적 목록 재전송 |
+| 그 외 오류 | 실행 실패 |
 
-## Webhook 수신 서버 서명 검증 가이드
-수신 서버는 아래 순서대로 서명을 검증하면 됩니다.
+현재 구현에서는 추가 페이지 조회가 끝나도 최초 404를 오류로 처리합니다.
 
-1. 요청의 raw body 문자열을 그대로 읽습니다.
-2. 헤더 `X-Signature-Timestamp`, `X-Signature-Sha256`가 모두 존재하는지 확인합니다.
-3. `X-Signature-Timestamp`를 정수로 파싱하고, 현재 시각과의 차이가 허용 범위(예: 300초) 이내인지 확인합니다.
-4. `expected = HMAC_SHA256_HEX(WEBHOOK_SECRET, timestamp + rawBody)`를 계산합니다.
-5. 수신한 `X-Signature-Sha256`와 constant-time 비교로 일치 여부를 확인합니다.
-6. 통과 후에만 raw body를 JSON으로 파싱해 비즈니스 로직을 수행합니다.
+<details>
+<summary>서명 검증 방법</summary>
 
-### Node.js(Express) 예시
-```typescript
-import crypto from 'node:crypto';
-import express from 'express';
+요청에는 다음 헤더가 포함됩니다.
 
-const app = express();
+- `Content-Type: application/json`
+- `X-Signature-Timestamp`: Unix 타임스탬프(초)
+- `X-Signature-Sha256`: HMAC-SHA256 서명(hex)
 
-// 반드시 raw body가 필요합니다.
-app.use('/toonation/webhook', express.text({ type: 'application/json' }));
-
-const SKEW_SECONDS = 300;
-const SECRET = process.env.WEBHOOK_SECRET!;
-
-app.post('/toonation/webhook', (req, res) => {
-  const rawBody = req.body as string;
-  const timestamp = req.header('X-Signature-Timestamp');
-  const signature = req.header('X-Signature-Sha256');
-
-  if (!timestamp || !signature) {
-    return res.status(401).send('missing-signature-headers');
-  }
-
-  const ts = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(ts)) {
-    return res.status(401).send('invalid-timestamp');
-  }
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (Math.abs(nowSec - ts) > SKEW_SECONDS) {
-    return res.status(401).send('timestamp-out-of-range');
-  }
-
-  const expectedHex = crypto
-    .createHmac('sha256', SECRET)
-    .update(`${ts}${rawBody}`, 'utf8')
-    .digest('hex');
-
-  const expected = Buffer.from(expectedHex, 'hex');
-  const received = Buffer.from(signature, 'hex');
-
-  if (
-    expected.length !== received.length ||
-    !crypto.timingSafeEqual(expected, received)
-  ) {
-    return res.status(401).send('invalid-signature');
-  }
-
-  const payload = JSON.parse(rawBody);
-  // TODO: payload 처리
-  return res.status(200).send('ok');
-});
-```
-
-참고:
-- JSON 파서를 먼저 붙이면 raw body가 바뀌어 서명 검증에 실패할 수 있습니다. 반드시 raw body 기준으로 검증하세요.
-- `WEBHOOK_SECRET`은 GitHub Actions의 비밀 변수와 수신 서버가 동일해야 합니다.
-
-## 스케줄 실행(GitHub Actions)
-
-실제 설정은 [`.github/workflows/cron.yml`](.github/workflows/cron.yml)에 정의되어 있습니다.
-
-- 실행 환경: `windows-2025`, Deno `2.7.11`
-- 기본 셸: Bash. NetBird 설치와 크롤링 단계는 `shell: pwsh`로 PowerShell 사용
-- 스케줄(UTC cron 기준):
-  - `0 0-14 * * *`: KST 09:00 ~ 23:00, 매 시 정각
-  - `0 15-18 * * *`: KST 00:00 ~ 03:00, 매 시 정각
-- 수동 실행: `workflow_dispatch` 지원
-
-필수 리포지토리 시크릿:
-
-- `TOONATION_ID`
-- `TOONATION_PASSWORD`
-- `WEBHOOK_URL`
-- `WEBHOOK_SECRET`
-- `NETBIRD_SETUP_KEY`
-
-워크플로 실행 순서:
-
-1. 저장소 체크아웃 및 Deno 설치 후 `deno install --frozen`으로 의존성을 준비합니다.
-2. `binaryInfo()`로 브라우저 버전과 캐시 경로를 확인하고 캐시를 복원합니다. `ensureBinary()`로 누락된 브라우저를 다운로드한 뒤 실행 여부를 검사합니다.
-3. NetBird `0.79.0`의 Windows 실행 파일을 다운로드하고 릴리스 체크섬과 SHA-256을 대조한 뒤 압축을 해제합니다.
-4. `.cache/toonation-profile` 브라우저 프로필 캐시를 복원합니다.
-5. **하나의 PowerShell 단계**에서 NetBird 시작, 연결 확인, SOCKS5 통신 검사, `deno run --frozen -A main.ts`를 순서대로 실행합니다. 단계 제한 시간은 크롤링을 포함해 10분입니다.
-6. `finally`에서 NetBird 프로세스를 종료합니다. 작업이 성공하면 캐시 액션이 브라우저 프로필을 저장합니다.
-
-### NetBird 프록시
-
-NetBird는 `service run`으로 실행하며 `NB_USE_NETSTACK_MODE=true`로 사용자 공간 네트워크 스택과 SOCKS5 프록시를 사용합니다. 브라우저와 프록시 모두 `127.0.0.1:1080`을 사용합니다.
-
-- 데몬 시작 확인: 최대 10회, 실패 시 1초 대기
-- 연결 준비 및 프록시 포트 확인: 최대 10회, 실패 시 2초 대기
-- 실제 통신 확인: `curl.exe`로 SOCKS5 프록시를 통해 대시보드 요청. 연결 제한 10초, 전체 요청 제한 30초
-
-반복 확인의 총 소요 시간에는 각 상태 확인 명령의 실행 시간도 포함됩니다. 프록시 검사는 HTTP 상태 코드를 출력하며, 연결이나 전송 오류로 curl이 실패하면 크롤링을 진행하지 않습니다.
-
-NetBird와 크롤링을 같은 단계에 두어 단계 전환 중 NetBird가 종료되는 문제를 피합니다. NetBird 실행 로그는 러너 임시 디렉토리의 `netbird/client.log`, `netbird/service.log`, `netbird/service-error.log`에 기록됩니다.
-
-### 캐시
-
-| 대상 | 경로 | 캐시 구분 기준 |
-| --- | --- | --- |
-| CloakBrowser 브라우저 | `.cache/cloakbrowser` 아래 `binaryInfo().cacheDir` | Windows 이미지, 아키텍처, 브라우저 버전, `deno.lock` 해시 |
-| 브라우저 프로필 | `.cache/toonation-profile` | Windows 이미지, 아키텍처, 브라우저 버전, 실행 ID와 재시도 번호 |
-
-브라우저는 `CLOAKBROWSER_AUTO_UPDATE=false`로 자동 업데이트를 끄고, 확인된 버전을 `CLOAKBROWSER_VERSION`으로 지정해 실행합니다. 프로필은 같은 환경·브라우저 버전의 캐시를 복원하고, 성공한 실행마다 새 키로 저장해 갱신합니다. 캐시가 없거나 로그인 세션이 만료된 경우에는 다시 로그인합니다. `.cache/`는 Git 추적에서 제외됩니다.
-
-## 프로젝트 구조
+수신 서버는 JSON 파싱 전의 원본 본문으로 서명을 계산합니다.
 
 ```text
-./
-  ├── .github/workflows/cron.yml # Windows 스케줄 실행, NetBird, 캐시
-  ├── main.ts          # 진입점: 세션 재사용, 로그인, 수집, Webhook 전송
-  ├── toonation.ts     # 목록 조회 로직(page.evaluate, from/to/page)
-  ├── webhook.ts       # HMAC 서명 생성 및 Webhook 전송
-  ├── utils.ts         # .NET ticks → ISO 문자열 변환 및 매핑
-  ├── types.ts         # 타입 정의(ToonationDonationItem 등)
-  ├── config.ts        # 환경 변수 로드 및 검증
-  ├── deno.json        # 태스크/포맷/린트/임포트 매핑
-  └── deno.lock        # 종속성 잠금 파일
+HMAC_SHA256_HEX(WEBHOOK_SECRET, timestamp + rawBody)
 ```
 
-## 포맷/린트
-- `deno fmt` 설정: `singleQuote: true`
-- `deno lint` 규칙 일부 비활성화: `no-explicit-any`
+타임스탬프가 허용 범위(예: 300초) 안인지 확인하고, 서명을 constant-time 방식으로 비교한 뒤 데이터를 처리합니다. 구현은 [webhook.ts](webhook.ts)를 참고하세요.
 
-## 트러블슈팅
-- **로그인 실패**: `TOONATION_ID`, `TOONATION_PASSWORD`를 확인하세요. 캡차/2단계 인증이 필요한 계정은 지원하지 않을 수 있습니다.
-- **브라우저 다운로드 실패**: CloakBrowser 다운로드 서버에 대한 네트워크 접근과 캐시 디렉토리 쓰기 권한을 확인하세요. `ensureBinary()` 명령으로 다운로드를 다시 시도할 수 있습니다.
-- **`ERR_PROXY_CONNECTION_FAILED`**: `127.0.0.1:1080` 프록시가 실행 중인지 확인하세요. Actions에서는 `Run main.ts with NetBird` 단계의 연결 확인 및 curl 오류를 확인하세요.
-- **화면 표시 대기 시간 초과**: 현재 로그인 입력창 또는 대시보드 헤더를 최대 10초 기다립니다. 프록시 연결 상태, 로그인 리다이렉트, 화면 구조 변경 여부를 확인하세요.
-- **Webhook 401/403**: `X-Signature-*` 검증 실패일 수 있습니다. `WEBHOOK_SECRET`, raw body 사용 여부, 타임스탬프 허용 범위를 확인하세요.
-- **404 반환 후 스크립트 종료**: Webhook이 본문으로 `not-found-last-donation` 외 다른 문자열을 반환하면 스크립트가 에러로 간주합니다. 처리 로직을 점검하세요.
+</details>
+
+## 문제 해결
+
+| 증상 | 확인할 내용 |
+| --- | --- |
+| `ERR_PROXY_CONNECTION_FAILED` | `127.0.0.1:1080` 프록시 실행 여부 |
+| `NetBird login failed` | Setup Key 만료·폐기·사용 횟수 제한 |
+| NetBird 연결 후 요청 실패 | Android Wi-Fi, Exit Node 경로 선택, 그룹과 접근 정책 |
+| 로그인 실패·화면 대기 초과 | 계정 정보, 캡차·2단계 인증, 페이지 구조 변경 |
+| Webhook 401/403 | 공유 서명 키, 원본 본문, 타임스탬프 |
+
+집 공인 IP는 같은 SOCKS5 프록시를 지정해 별도로 확인하세요. Actions의 통신 검사는 IP를 비교하지 않으며, Android와 같은 Wi-Fi에서 테스트하면 직접 연결도 같은 IP를 사용합니다.
+
+<details>
+<summary>로그와 주요 파일</summary>
+
+Actions의 NetBird 로그는 러너 임시 디렉토리의 `netbird/client.log`, `netbird/service.log`, `netbird/service-error.log`에 기록됩니다.
+
+| 파일 | 역할 |
+| --- | --- |
+| [main.ts](main.ts) | 브라우저 실행, 로그인, 수집·전송 |
+| [toonation.ts](toonation.ts) | 후원 목록 API 조회 |
+| [webhook.ts](webhook.ts) | Webhook 서명 및 전송 |
+| [config.ts](config.ts) | 환경 변수 검증 |
+| [.github/workflows/cron.yml](.github/workflows/cron.yml) | 스케줄, NetBird, 캐시 |
+
+</details>

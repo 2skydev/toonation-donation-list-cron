@@ -7,13 +7,13 @@ import { sendSignedWebhook } from './webhook.ts';
 const context = await launchPersistentContext({
   headless: false,
   humanize: true,
-  // proxy: 'socks5://127.0.0.1:1080',
+  proxy: 'socks5://127.0.0.1:1080',
   locale: 'ko-KR',
   timezone: 'Asia/Seoul',
   userDataDir: './.cache/toonation-profile',
-  // args: [
-  //   // '--fingerprint=1212',
-  // ],
+  args: [
+    '--fingerprint=1212',
+  ],
 });
 
 const page = await context.newPage();

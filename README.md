@@ -1,6 +1,6 @@
 # 투네이션 후원 목록 자동 수집
 
-투네이션 후원 내역을 수집해 Webhook으로 전송하는 Deno 스크립트입니다. GitHub Actions에서 정기 실행하며, 브라우저 요청은 집 네트워크의 NetBird Exit Node를 경유합니다.
+투네이션 후원 내역을 수집해 Webhook으로 전송하는 Deno 스크립트입니다. 외부 cron이 GitHub Actions를 정기 실행하며, 브라우저 요청은 집 네트워크의 NetBird Exit Node를 경유합니다.
 
 - **세션 재사용**: 저장된 브라우저 프로필을 사용하고, 세션이 만료되면 다시 로그인합니다.
 - **후원 수집**: 2016-01-01부터 오늘까지의 내역을 페이지별로 조회합니다.
@@ -12,7 +12,7 @@
 
 ```mermaid
 flowchart TB
-    trigger["정기 실행 / 수동 실행"]
+    trigger["외부 cron / 수동 실행<br/>workflow_dispatch"]
 
     subgraph runner["GitHub Actions · Windows"]
         prepare["의존성 준비 · 캐시 복원"]
@@ -90,17 +90,19 @@ WEBHOOK_SECRET=your_webhook_secret
 
 ### GitHub Actions
 
+GitHub Actions 자체 스케줄이 불안정해 외부 cron으로 전환했습니다. 실행 주기는 외부 cron에서 관리하며, [Workflow dispatch API](https://docs.github.com/ko/rest/actions/workflows?apiVersion=2026-03-10#create-a-workflow-dispatch-event)로 `cron.yml`을 실행합니다.
+
+외부 cron은 `POST /repos/{owner}/{repo}/actions/workflows/cron.yml/dispatches`를 호출하며, 요청 본문의 `ref`에 실행할 브랜치 또는 태그를 지정합니다. 세분화된 토큰을 사용한다면 대상 저장소의 `Actions: write` 권한이 필요합니다.
+
 `Actions` → `Cron` → `Run workflow`로 수동 실행할 수 있습니다.
 
 | 항목 | 설정 |
 | --- | --- |
-| 정기 실행 | KST 00-03시, 09-23시 매 시 7분 |
+| 정기 실행 | 외부 cron에서 `workflow_dispatch` 호출 |
 | 실행 환경 | Windows 2025, Deno 2.7.11 |
 | 프록시 | NetBird 0.79.0 직접 실행 · netstack SOCKS5 |
 | 캐시 | 브라우저 바이너리와 로그인 프로필 재사용 |
 | 제한 시간 | NetBird 연결과 크롤링 단계에 10분 |
-
-GitHub [공식 문서](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)에 따르면 매시간 정각에는 부하가 높아 스케줄 실행이 지연되거나 대기 작업이 누락될 수 있습니다. 정각을 피하기 위해 매 시 7분으로 설정했으며, 정확한 실행 시각을 보장하지는 않습니다.
 
 세부 설정은 [cron.yml](.github/workflows/cron.yml)에 있습니다. 프록시 통신 확인 후 크롤링을 시작하며, 종료 시 NetBird 프로세스를 정리합니다.
 
@@ -222,6 +224,6 @@ Actions의 NetBird 로그는 러너 임시 디렉토리의 `netbird/client.log`,
 | [toonation.ts](toonation.ts) | 후원 목록 API 조회 |
 | [webhook.ts](webhook.ts) | Webhook 서명 및 전송 |
 | [config.ts](config.ts) | 환경 변수 검증 |
-| [.github/workflows/cron.yml](.github/workflows/cron.yml) | 스케줄, NetBird, 캐시 |
+| [.github/workflows/cron.yml](.github/workflows/cron.yml) | 외부 호출·수동 실행, NetBird, 캐시 |
 
 </details>

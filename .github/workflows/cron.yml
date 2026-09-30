@@ -1,9 +1,6 @@
 name: Cron
 
 on:
-  schedule:
-    - cron: '7 0-14 * * *' # KST 09:07 ~ 23:07
-    - cron: '7 15-18 * * *' # KST 00:07 ~ 03:07
   workflow_dispatch:
 
 jobs:

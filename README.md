@@ -94,11 +94,13 @@ WEBHOOK_SECRET=your_webhook_secret
 
 | 항목 | 설정 |
 | --- | --- |
-| 정기 실행 | KST 00-03시, 09-23시 매 시 정각 |
+| 정기 실행 | KST 00-03시, 09-23시 매 시 7분 |
 | 실행 환경 | Windows 2025, Deno 2.7.11 |
 | 프록시 | NetBird 0.79.0 직접 실행 · netstack SOCKS5 |
 | 캐시 | 브라우저 바이너리와 로그인 프로필 재사용 |
 | 제한 시간 | NetBird 연결과 크롤링 단계에 10분 |
+
+GitHub [공식 문서](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)에 따르면 매시간 정각에는 부하가 높아 스케줄 실행이 지연되거나 대기 작업이 누락될 수 있습니다. 정각을 피하기 위해 매 시 7분으로 설정했으며, 정확한 실행 시각을 보장하지는 않습니다.
 
 세부 설정은 [cron.yml](.github/workflows/cron.yml)에 있습니다. 프록시 통신 확인 후 크롤링을 시작하며, 종료 시 NetBird 프로세스를 정리합니다.
 

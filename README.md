@@ -125,9 +125,7 @@ docker run --detach \
   --publish 127.0.0.1:1080:1080 \
   --env NB_SETUP_KEY \
   --env NB_USE_NETSTACK_MODE=true \
-  --env NB_NETSTACK_SKIP_PROXY=false \
   --env NB_SOCKS5_LISTENER_ADDRESS=0.0.0.0 \
-  --env NB_SOCKS5_LISTENER_PORT=1080 \
   netbirdio/netbird:0.79.0-rootless
 
 unset NB_SETUP_KEY
@@ -216,7 +214,7 @@ HMAC_SHA256_HEX(WEBHOOK_SECRET, timestamp + rawBody)
 <details>
 <summary>로그와 주요 파일</summary>
 
-Actions의 NetBird 로그는 러너 임시 디렉토리의 `netbird/client.log`, `netbird/service.log`, `netbird/service-error.log`에 기록됩니다.
+Actions의 NetBird 로그는 `%PROGRAMDATA%\Netbird\client.log`에 기록됩니다. 표준 출력과 오류는 러너 임시 디렉토리의 `netbird/service.log`, `netbird/service-error.log`에 기록됩니다.
 
 | 파일 | 역할 |
 | --- | --- |

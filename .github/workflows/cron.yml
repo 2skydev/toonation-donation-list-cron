@@ -90,14 +90,7 @@ jobs:
         timeout-minutes: 10
         env:
           NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
-          NB_STATE_DIR: ${{ runner.temp }}/netbird/state
-          NB_CONFIG: ${{ runner.temp }}/netbird/state/default.json
-          NB_DAEMON_ADDR: npipe://netbird-cron
-          NB_LOG_FILE: ${{ runner.temp }}/netbird/client.log
           NB_USE_NETSTACK_MODE: 'true'
-          NB_NETSTACK_SKIP_PROXY: 'false'
-          NB_SOCKS5_LISTENER_ADDRESS: '127.0.0.1'
-          NB_SOCKS5_LISTENER_PORT: '1080'
           TOONATION_ID: ${{ secrets.TOONATION_ID }}
           TOONATION_PASSWORD: ${{ secrets.TOONATION_PASSWORD }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
@@ -105,7 +98,6 @@ jobs:
         run: |
           $netbirdDir = Join-Path $env:RUNNER_TEMP 'netbird'
           $netbirdExe = Join-Path $netbirdDir 'netbird.exe'
-          New-Item -ItemType Directory -Path $env:NB_STATE_DIR -Force | Out-Null
           $daemon = Start-Process -FilePath $netbirdExe -ArgumentList 'service', 'run' -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput (Join-Path $netbirdDir 'service.log') `
             -RedirectStandardError (Join-Path $netbirdDir 'service-error.log')
@@ -117,7 +109,7 @@ jobs:
               Start-Sleep -Seconds 1
             }
             if ($LASTEXITCODE -ne 0) { throw 'NetBird daemon startup timed out.' }
-            & $netbirdExe up --hostname "gha-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            & $netbirdExe up
             if ($LASTEXITCODE -ne 0) { throw 'NetBird login failed.' }
 
             $ready = $false

@@ -35,7 +35,7 @@ jobs:
         run: deno install --frozen
 
       - name: Test profile encryption
-        run: deno test --frozen --allow-read --allow-write --allow-run=tar profile-cache_test.ts
+        run: deno test --frozen -A profile-cache_test.ts
 
       - name: Resolve browser version
         id: browser

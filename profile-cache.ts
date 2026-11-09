@@ -1,4 +1,5 @@
 import { dirname } from 'node:path';
+import { create, extract } from 'tar';
 
 const PROFILE_DIR = './.cache/toonation-profile-portable';
 const ARCHIVE_PATH = './.cache/toonation-profile.enc';
@@ -31,18 +32,6 @@ export const profileCacheKey = async (secret: string | undefined) => {
   };
 };
 
-const tar = async (args: string[]) => {
-  const result = await new Deno.Command('tar', {
-    args,
-    stdout: 'null',
-    stderr: 'piped',
-  }).output();
-
-  if (!result.success) {
-    throw new Error('브라우저 프로필 압축 또는 복원에 실패했습니다.');
-  }
-};
-
 export const saveProfile = async (
   key: CryptoKey,
   profileDir = PROFILE_DIR,
@@ -52,7 +41,9 @@ export const saveProfile = async (
 
   try {
     const archive = `${temporaryDir}/profile.tar.gz`;
-    await tar(['-czf', archive, '-C', profileDir, '.']);
+    await create({ file: archive, cwd: profileDir, gzip: true, strict: true }, [
+      '.',
+    ]);
     const plaintext = await Deno.readFile(archive);
     const nonce = crypto.getRandomValues(new Uint8Array(NONCE_LENGTH));
     const ciphertext = new Uint8Array(
@@ -124,7 +115,7 @@ export const restoreProfile = async (
     await Deno.writeFile(archive, plaintext);
     plaintext.fill(0);
     await Deno.mkdir(profileDir, { recursive: true });
-    await tar(['-xzf', archive, '-C', profileDir]);
+    await extract({ file: archive, cwd: profileDir, strict: true });
     console.info('암호화된 브라우저 프로필 전체를 복원했습니다.');
   } finally {
     plaintext.fill(0);

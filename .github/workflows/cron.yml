@@ -92,21 +92,15 @@ jobs:
 
       - name: Install NetBird
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $netbirdDir = Join-Path $env:RUNNER_TEMP 'netbird'
           New-Item -ItemType Directory -Path $netbirdDir -Force | Out-Null
           $archive = 'netbird_0.79.0_windows_amd64.tar.gz'
+          $releaseUrl = 'https://github.com/netbirdio/netbird/releases/download/v0.79.0'
           $archivePath = Join-Path $netbirdDir $archive
-          $checksumsPath = Join-Path $netbirdDir 'netbird_0.79.0_checksums.txt'
-          for ($attempt = 0; $attempt -le 3; $attempt++) {
-            gh release download v0.79.0 --repo netbirdio/netbird --pattern $archive `
-              --pattern netbird_0.79.0_checksums.txt --dir $netbirdDir --clobber
-            if ($LASTEXITCODE -eq 0) { break }
-            if ($attempt -eq 3) { throw 'NetBird download failed after retries.' }
-            Start-Sleep -Seconds 5
-          }
+          $checksumsPath = Join-Path $netbirdDir 'checksums.txt'
+          Invoke-WebRequest "$releaseUrl/$archive" -OutFile $archivePath -MaximumRetryCount 3 -RetryIntervalSec 5
+          Invoke-WebRequest "$releaseUrl/netbird_0.79.0_checksums.txt" -OutFile $checksumsPath -MaximumRetryCount 3 -RetryIntervalSec 5
 
           $checksumLine = Get-Content $checksumsPath | Where-Object { ($_ -split '\s+')[1] -eq $archive }
           if (-not $checksumLine) { throw 'NetBird checksum not found.' }

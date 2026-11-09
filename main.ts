@@ -9,6 +9,8 @@ import {
   recordProfileDiagnostics,
 } from './diagnostics.ts';
 
+const PAGE_TIMEOUT = 60_000;
+
 await recordProfileDiagnostics();
 
 const context = await launchPersistentContext({
@@ -74,7 +76,10 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
 
 try {
   await recordBrowserDiagnostics(page, 'browser-started', loginSession);
-  await page.goto('https://toon.at/streamer/dashboard');
+  await page.goto('https://toon.at/streamer/dashboard', {
+    waitUntil: 'domcontentloaded',
+    timeout: PAGE_TIMEOUT,
+  });
 
   const loginInput = page.getByPlaceholder('아이디 입력');
   const dashboardHeader = page.locator(
@@ -82,26 +87,58 @@ try {
   );
 
   // 페이지 로드 이후 진행되는 인증 확인과 화면 렌더링을 기다립니다.
-  await loginInput.or(dashboardHeader).first().waitFor({ timeout: 10000 });
+  await loginInput.or(dashboardHeader).first().waitFor({
+    timeout: PAGE_TIMEOUT,
+  });
 
   if (new URL(page.url()).pathname === '/streamer/login') {
     loginSession = 'required';
     await recordBrowserDiagnostics(page, 'login-required', loginSession);
 
-    await loginInput.fill(config.toonation.id);
+    await page.bringToFront();
+    await page.waitForFunction(
+      () => {
+        const input = document.querySelector(
+          'input[placeholder="아이디 입력"]',
+        );
+        if (!input) return false;
+
+        return document.getAnimations().every((animation) => {
+          const target = (animation.effect as KeyframeEffect | null)?.target;
+
+          return !(target instanceof Element && target.contains(input)) ||
+            animation.effect?.getComputedTiming().iterations === Infinity ||
+            animation.playState === 'finished' ||
+            animation.playState === 'idle';
+        });
+      },
+      undefined,
+      { timeout: PAGE_TIMEOUT },
+    );
+
+    await loginInput.fill(config.toonation.id, { timeout: PAGE_TIMEOUT });
     await page.getByPlaceholder('패스워드 입력').fill(
       config.toonation.password,
+      { timeout: PAGE_TIMEOUT },
     );
     if (!await page.getByLabel('로그인 상태 유지').isChecked()) {
       await page.getByText('로그인 상태 유지', { exact: true }).click();
     }
 
+    const loginButton = page.getByText('로그인', { exact: true });
+    await loginButton.and(page.locator(':enabled')).waitFor({
+      timeout: PAGE_TIMEOUT,
+    });
+
     await recordBrowserDiagnostics(page, 'before-login-click', loginSession);
-    await page.getByText('로그인', { exact: true }).click();
-    await page.waitForURL('**/dashboard');
+    await loginButton.click({ timeout: PAGE_TIMEOUT });
+    await page.waitForURL('**/dashboard', {
+      waitUntil: 'domcontentloaded',
+      timeout: PAGE_TIMEOUT,
+    });
   }
 
-  await dashboardHeader.waitFor({ timeout: 10000 });
+  await dashboardHeader.waitFor({ timeout: PAGE_TIMEOUT });
 
   loginSession = loginSession === 'required' ? 'new-login' : 'reused';
   await recordBrowserDiagnostics(page, 'authenticated', loginSession);

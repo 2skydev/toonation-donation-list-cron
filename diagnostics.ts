@@ -59,6 +59,10 @@ export const recordBrowserDiagnostics = async (
         const captcha = input('input[name="cf-turnstile-response"]');
 
         return {
+          documentReadyState: document.readyState,
+          dashboardHeaderPresent: document.querySelector(
+            'header[class*="_RouteDashboardHeader_"]',
+          ) !== null,
           loginInputPresent: input('input[placeholder="아이디 입력"]') !== null,
           idFilled: Boolean(input('input[placeholder="아이디 입력"]')?.value),
           passwordFilled: Boolean(input('input[type="password"]')?.value),

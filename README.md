@@ -216,6 +216,18 @@ HMAC_SHA256_HEX(WEBHOOK_SECRET, timestamp + rawBody)
 
 Actions의 NetBird 로그는 `%PROGRAMDATA%\Netbird\client.log`에 기록됩니다. 표준 출력과 오류는 러너 임시 디렉토리의 `netbird/service.log`, `netbird/service-error.log`에 기록됩니다.
 
+브라우저 진단은 Actions 로그와 `browser-diagnostics-실행ID-시도번호` 아티팩트에 기록되며, 아티팩트는 7일간 보관됩니다.
+
+- `profile.json`: 복원한 캐시 키와 브라우저 실행 전 프로필 파일의 존재 여부
+- `browser-started.json`: 페이지 접속 전 인증 쿠키의 존재 여부와 만료 정보
+- `login-required.json`, `before-login-click.json`: 로그인 화면, 입력 여부, 로그인 버튼과 캡차 토큰의 준비 상태
+- `authenticated.json`: `loginSession`이 `reused`이면 재로그인 없이 대시보드에 진입했고, `new-login`이면 이번 실행에서 로그인했습니다.
+- `failure.json`, `failure.png`: 실패 시 상태와 화면. 입력 필드는 가리며, 로그인 화면 외 페이지는 본문 전체를 가립니다.
+
+쿠키 값, 비밀번호, 캡차 토큰 값, URL의 쿼리와 해시는 진단에 포함하지 않습니다. 원본 프로필과 HTML도 아티팩트에 올리지 않습니다.
+
+세션만 확인하려면 `Run workflow`에서 `login_check_only`를 선택합니다. 후원 조회와 Webhook 전송 없이 로그인까지만 진행하며, 두 번 연속 실행해 두 번째 실행의 `authenticated.json`이 `reused`인지 확인합니다. 캐시가 복원됐더라도 인증 쿠키가 없거나 만료되었거나 서버에서 거부되면 재로그인이 필요합니다.
+
 | 파일 | 역할 |
 | --- | --- |
 | [main.ts](main.ts) | 브라우저 실행, 로그인, 수집·전송 |

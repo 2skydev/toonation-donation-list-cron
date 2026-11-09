@@ -2,6 +2,11 @@ name: Cron
 
 on:
   workflow_dispatch:
+    inputs:
+      login_check_only:
+        description: '로그인 세션만 확인하고 후원 조회와 Webhook 전송 생략'
+        type: boolean
+        default: false
 
 jobs:
   cron:
@@ -78,6 +83,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'NetBird extraction failed.' }
 
       - name: Cache browser profile
+        id: profile
         uses: actions/cache@v6
         with:
           path: .cache/toonation-profile
@@ -95,6 +101,8 @@ jobs:
           TOONATION_PASSWORD: ${{ secrets.TOONATION_PASSWORD }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          BROWSER_PROFILE_CACHE_KEY: ${{ steps.profile.outputs.cache-matched-key }}
+          LOGIN_CHECK_ONLY: ${{ inputs.login_check_only }}
         run: |
           $netbirdDir = Join-Path $env:RUNNER_TEMP 'netbird'
           $netbirdExe = Join-Path $netbirdDir 'netbird.exe'
@@ -137,3 +145,13 @@ jobs:
           } finally {
             Stop-Process -Id $daemon.Id -ErrorAction SilentlyContinue
           }
+
+      - name: Upload browser diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .cache/diagnostics/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7

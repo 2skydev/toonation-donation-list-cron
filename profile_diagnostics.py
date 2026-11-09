@@ -6,7 +6,7 @@ import time
 import base64
 from pathlib import Path
 
-profile = Path('.cache/toonation-profile')
+profile = Path('.cache/toonation-profile-portable')
 state_path = profile / 'Local State'
 state = json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
 key_hashes = {

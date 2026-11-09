@@ -8,6 +8,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: toonation-cron
+  cancel-in-progress: false
+
 jobs:
   cron:
     runs-on: windows-2025
@@ -17,6 +21,7 @@ jobs:
     env:
       CLOAKBROWSER_AUTO_UPDATE: 'false'
       CLOAKBROWSER_CACHE_DIR: ${{ github.workspace }}/.cache/cloakbrowser
+      CLOAKBROWSER_LICENSE_KEY: ${{ secrets.CLOAKBROWSER_LICENSE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -29,27 +34,51 @@ jobs:
       - name: Install dependencies
         run: deno install --frozen
 
+      - name: Test profile encryption
+        run: deno test --frozen --allow-read --allow-write --allow-run=tar profile-cache_test.ts
+
       - name: Resolve browser version
         id: browser
+        env:
+          BROWSER_PROFILE_KEY: ${{ secrets.BROWSER_PROFILE_KEY }}
         run: |
           deno eval --frozen '
             import { binaryInfo } from "cloakbrowser";
-            const { version, cacheDir } = binaryInfo();
-            await Deno.writeTextFile(Deno.env.get("GITHUB_OUTPUT"), `version=${version}\npath=${cacheDir}\n`, { append: true });
+            import { profileCacheKey } from "./profile-cache.ts";
+            if (!Deno.env.get("CLOAKBROWSER_LICENSE_KEY")?.trim()) {
+              throw new Error("CLOAKBROWSER_LICENSE_KEY Secret을 등록해주세요.");
+            }
+            const { id } = await profileCacheKey(Deno.env.get("BROWSER_PROFILE_KEY"));
+            const response = await fetch("https://cloakbrowser.dev/api/download/version", {
+              headers: { "X-Platform": "windows-x64" },
+              signal: AbortSignal.timeout(15_000),
+            });
+            if (!response.ok) throw new Error(`최신 브라우저 버전 조회 실패: HTTP ${response.status}`);
+            const { version } = await response.json();
+            if (typeof version !== "string" || !/^\d+(?:\.\d+){3,4}$/.test(version) || Number(version.split(".")[0]) < 151) {
+              throw new Error("포터블 쿠키를 지원하는 최신 버전을 확인하지 못했습니다.");
+            }
+            const { cacheDir } = binaryInfo(version);
+            await Deno.writeTextFile(Deno.env.get("GITHUB_OUTPUT"), `version=${version}\npath=${cacheDir}\nprofile-key-id=${id}\n`, { append: true });
             await Deno.writeTextFile(Deno.env.get("GITHUB_ENV"), `CLOAKBROWSER_VERSION=${version}\n`, { append: true });
+            console.log(`이번 실행에서 사용할 최신 안정 버전: ${version}`);
           '
 
       - name: Cache CloakBrowser
         uses: actions/cache@v6
         with:
           path: ${{ steps.browser.outputs.path }}
-          key: cloakbrowser-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
+          key: cloakbrowser-v2-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ hashFiles('deno.lock') }}
 
       - name: Download CloakBrowser
         run: |
           deno eval --frozen '
-            import { ensureBinary } from "cloakbrowser";
-            console.log(await ensureBinary());
+            import { binaryInfo, ensureBinary } from "cloakbrowser";
+            const path = await ensureBinary();
+            if (path !== binaryInfo().binaryPath) {
+              throw new Error("조회한 최신 버전과 다운로드 결과가 다릅니다. 다시 실행해주세요.");
+            }
+            console.log(path);
           '
 
       - name: Check browser launch
@@ -86,10 +115,15 @@ jobs:
         id: profile
         uses: actions/cache@v6
         with:
-          path: .cache/toonation-profile
-          key: toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .cache/toonation-profile.enc
+          key: toonation-profile-portable-v2-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.profile-key-id }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            toonation-profile-v1-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.version }}-
+            toonation-profile-portable-v2-windows-2025-${{ runner.arch }}-${{ steps.browser.outputs.profile-key-id }}-
+
+      - name: Restore encrypted browser profile
+        env:
+          BROWSER_PROFILE_KEY: ${{ secrets.BROWSER_PROFILE_KEY }}
+        run: deno run --frozen -A profile-cache.ts restore
 
       - name: Run main.ts with NetBird
         shell: pwsh
@@ -145,6 +179,11 @@ jobs:
           } finally {
             Stop-Process -Id $daemon.Id -ErrorAction SilentlyContinue
           }
+
+      - name: Encrypt browser profile
+        env:
+          BROWSER_PROFILE_KEY: ${{ secrets.BROWSER_PROFILE_KEY }}
+        run: deno run --frozen -A profile-cache.ts save
 
       - name: Upload browser diagnostics
         if: ${{ !cancelled() }}

@@ -74,17 +74,27 @@ Actions는 실행마다 새 피어를 등록하므로 키의 만료일과 사용
 | `WEBHOOK_URL` | 후원 목록을 받을 URL |
 | `WEBHOOK_SECRET` | 수신 서버와 공유하는 HMAC 서명 키 |
 | `NETBIRD_SETUP_KEY` | Actions에서 NetBird에 등록할 Setup Key |
+| `CLOAKBROWSER_LICENSE_KEY` | 최신 CloakBrowser를 다운로드하고 실행할 라이선스 키 |
+| `BROWSER_PROFILE_KEY` | Actions 프로필 캐시를 암호화할 64자리 16진수 키 |
 
-**GitHub Actions**에서는 저장소의 `Settings` → `Secrets and variables` → `Actions`에 위 5개 값을 등록합니다.
+**GitHub Actions**에서는 저장소의 `Settings` → `Secrets and variables` → `Actions`에 위 7개 값을 등록합니다. 기존 설정에서 전환한다면 마지막 두 Secret만 추가하면 됩니다.
+
+1. [CloakBrowser](https://cloakbrowser.dev/)에서 라이선스 키를 발급받아 `CLOAKBROWSER_LICENSE_KEY`에 등록합니다. [무료 키](https://cloakbrowser.dev/free)도 최신 브라우저를 제공하며 동시 실행은 1개입니다.
+2. `openssl rand -hex 32`로 별도의 암호화 키를 생성하고 출력된 64자리 값을 `BROWSER_PROFILE_KEY`에 등록합니다. 키를 코드나 채팅에 붙여 넣지 마세요.
+
+포터블 프로필은 다른 기기에서도 인증에 사용할 수 있으므로, 캐시에는 프로필 전체를 AES-256-GCM으로 암호화한 `.cache/toonation-profile.enc`만 저장합니다. 쿠키를 별도 파일로 추출하거나 추가 인증 API를 호출하지 않습니다. 암호화 키를 교체하면 다른 캐시를 사용하고 새로 로그인합니다. 두 Secret 중 하나라도 없으면 브라우저 실행 전에 실패합니다.
 
 **로컬 실행**에서는 프로젝트 루트에 `.env`를 만듭니다. Setup Key는 아래 Docker 실행 시 별도로 입력합니다.
 
 ```dotenv
+CLOAKBROWSER_LICENSE_KEY=your_cloakbrowser_license_key
 TOONATION_ID=your_toonation_id
 TOONATION_PASSWORD=your_toonation_password
 WEBHOOK_URL=https://your.service.example.com/toonation/webhook
 WEBHOOK_SECRET=your_webhook_secret
 ```
+
+로컬에서 프로필 캐시 암호화 명령을 직접 실행하지 않는다면 `BROWSER_PROFILE_KEY`는 필요하지 않습니다.
 
 ## 실행
 
@@ -100,15 +110,29 @@ GitHub Actions 자체 스케줄이 불안정해 외부 cron으로 전환했습�
 | --- | --- |
 | 정기 실행 | 외부 cron에서 `workflow_dispatch` 호출 |
 | 실행 환경 | Windows 2025, Deno 2.7.11 |
+| 브라우저 | CloakBrowser SDK 0.7.1, 실행 시작 시 조회한 최신 안정 Chromium |
 | 프록시 | NetBird 0.79.0 직접 실행 · netstack SOCKS5 |
-| 캐시 | 브라우저 바이너리와 로그인 프로필 재사용 |
+| 캐시 | 브라우저 바이너리와 암호화된 로그인 프로필 재사용 |
 | 제한 시간 | NetBird 연결과 크롤링 단계에 10분 |
 
 세부 설정은 [cron.yml](.github/workflows/cron.yml)에 있습니다. 프록시 통신 확인 후 크롤링을 시작하며, 종료 시 NetBird 프로세스를 정리합니다.
 
-`--restore-last-session`으로 이전 브라우저 세션과 세션 쿠키 복원을 요청합니다. 복원된 탭을 재사용하며, 인증이 만료되거나 서버에서 거부되면 다시 로그인합니다.
+실행 시작 시 Windows용 최신 안정 버전을 조회하고 해당 버전의 바이너리 캐시를 복원합니다. 다운로드는 SDK의 서명 검증을 거치며, 조회에 실패하거나 다운로드 결과가 다르면 실행을 중단합니다. 버전 확인 뒤에는 그 실행에서 사용할 버전을 고정합니다. 브라우저 바이너리 폴더만 캐시하며 라이선스 저장 파일과 검증 캐시는 포함하지 않습니다.
 
-현재 Windows 2025와 CloakBrowser Chromium 146에서는 서로 다른 러너에 복원한 프로필의 쿠키 암호화 키를 DPAPI로 복호화하지 못하는 것을 [Actions에서 확인했습니다](https://github.com/2skydev/toonation-donation-list-cron/actions/runs/42564372076). 캐시의 키와 쿠키 DB는 그대로 복원됐지만, 기존 키는 `0x8009000B`로 복호화에 실패하고 브라우저가 생성한 새 키는 정상 복호화됐습니다. 서버 세션 쿠키 `__toonation_session_id__`와 `__api_toonation_session_id__`의 기존 값이 유지되지 않아 `/dapi/streamer/common`이 `IsLogin: false`를 반환했습니다. 따라서 현재 구성에서는 프로필 파일 복사만으로 서버 로그인 상태가 유지되지 않습니다. 이 원인 확인을 위해 추가 인증 로직을 도입하지 않았습니다.
+기존 Chromium 146에서는 프로필을 다른 Windows 러너에 복원하면 DPAPI 키 복호화가 `0x8009000B`로 실패하는 것을 [Actions에서 확인했습니다](https://github.com/2skydev/toonation-donation-list-cron/actions/runs/42564372076). 서버 세션 쿠키 값이 유지되지 않고 `/dapi/streamer/common`이 `IsLogin: false`를 반환했습니다.
+
+이를 해결하기 위해 Chromium 151 이상에서 지원하는 [`--fingerprint-portable-cookies`](https://github.com/CloakHQ/CloakBrowser#fingerprint-management)를 첫 실행부터 적용합니다. 이전 DPAPI 프로필을 가져오지 않고 `.cache/toonation-profile-portable`과 새 캐시 네임스페이스로 시작하므로, 전환 후 최초 실행은 기존 로그인 화면을 통해 새로 인증해야 합니다. 이후에는 암호화된 프로필을 복원하고, `--restore-last-session`으로 이전 탭과 세션 쿠키를 복원합니다. 인증이 만료되거나 서버에서 거부되면 다시 로그인합니다.
+
+프로필 캐시는 브라우저 버전이 바뀌어도 이어서 사용합니다. 실행은 저장소 내에서 순차 처리하며, 성공적으로 브라우저가 닫힌 뒤 프로필을 암호화하고 성공한 작업의 캐시만 저장합니다.
+
+#### 전환 후 세션 재사용 확인
+
+1. 두 Secret을 등록한 뒤 변경사항이 있는 브랜치를 선택하고 `login_check_only`를 켜서 수동 실행합니다. 이 모드에서는 후원 조회와 Webhook 전송을 생략합니다.
+2. 첫 실행이 성공해 캐시 저장까지 끝난 다음, 같은 브랜치에서 같은 설정으로 한 번 더 실행합니다.
+3. 두 번째 실행에서 프로필 캐시가 복원됐는지 확인합니다. `cache-hit: false`도 접두사로 기존 캐시를 복원한 경우에는 정상입니다.
+4. `browser-diagnostics` 아티팩트에서 첫 실행의 `authenticated.json`과 두 번째 실행의 `browser-started.json`에 기록된 서버 쿠키 `__toonation_session_id__`, `__api_toonation_session_id__`의 `valueHash`를 비교합니다. 두 번째 실행에서 로그인 제출 전 `/dapi/streamer/common` 응답의 `IsLogin`이 `true`이고 최종 `loginSession`이 `reused`인지 함께 확인합니다.
+
+라이선스 키 등록 전에는 최신 브라우저의 실제 실행과 Windows 러너 간 세션 재사용을 검증할 수 없습니다. 첫 실행이 실패하면 프로필 캐시가 저장되지 않으므로, 성공한 최초 실행 이후에 재사용 여부를 판단합니다.
 
 페이지 이동은 `DOMContentLoaded` 이후 로그인 입력창 또는 대시보드 헤더가 나타날 때까지 기다립니다. 로그인 화면에서는 입력창 상위 요소의 진입 애니메이션이 끝난 뒤 입력하고, 캡차 완료로 로그인 버튼이 활성화된 뒤 클릭합니다. 각 대기에는 최대 60초를 허용합니다.
 
@@ -152,7 +176,7 @@ docker exec netbird-local netbird networks ls
 deno task start
 ```
 
-`.env`를 읽어 후원 내역을 수집하고 Webhook으로 전송합니다. 로그인 프로필은 `.cache/toonation-profile`에 저장됩니다. 파일 변경 시 재실행하려면 `deno task dev`를 사용합니다.
+`.env`를 읽어 후원 내역을 수집하고 Webhook으로 전송합니다. 로그인 프로필은 `.cache/toonation-profile-portable`에 저장됩니다. 파일 변경 시 재실행하려면 `deno task dev`를 사용합니다.
 
 **3. 프록시 종료**
 
@@ -210,6 +234,8 @@ HMAC_SHA256_HEX(WEBHOOK_SECRET, timestamp + rawBody)
 | 증상 | 확인할 내용 |
 | --- | --- |
 | `ERR_PROXY_CONNECTION_FAILED` | `127.0.0.1:1080` 프록시 실행 여부 |
+| 라이선스 오류 | `CLOAKBROWSER_LICENSE_KEY` 등록, 키 유효성, 다른 기기에서 실행 중인 브라우저 수 |
+| 프로필 암호화 또는 복원 실패 | `BROWSER_PROFILE_KEY`가 64자리 16진수인지 확인. 복호화 실패 시 해당 캐시를 삭제하고 새로 로그인 |
 | `NetBird login failed` | Setup Key 만료·폐기·사용 횟수 제한 |
 | NetBird 연결 후 요청 실패 | Exit Node 기기의 네트워크 연결, 경로 선택, 그룹과 접근 정책 |
 | 로그인 실패·화면 대기 초과 | 계정 정보, 캡차·2단계 인증, 페이지 구조 변경 |
@@ -242,6 +268,7 @@ Actions의 NetBird 로그는 `%PROGRAMDATA%\Netbird\client.log`에 기록됩니�
 | [toonation.ts](toonation.ts) | 후원 목록 API 조회 |
 | [webhook.ts](webhook.ts) | Webhook 서명 및 전송 |
 | [config.ts](config.ts) | 환경 변수 검증 |
+| [profile-cache.ts](profile-cache.ts) | 프로필 전체 암호화와 복원 |
 | [.github/workflows/cron.yml](.github/workflows/cron.yml) | 외부 호출·수동 실행, NetBird, 캐시 |
 
 </details>

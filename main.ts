@@ -20,9 +20,10 @@ const context = await launchPersistentContext({
   proxy: 'socks5://127.0.0.1:1080',
   locale: 'ko-KR',
   timezone: 'Asia/Seoul',
-  userDataDir: './.cache/toonation-profile',
+  userDataDir: './.cache/toonation-profile-portable',
   args: [
     '--fingerprint=1212',
+    '--fingerprint-portable-cookies',
     '--restore-last-session',
   ],
 });

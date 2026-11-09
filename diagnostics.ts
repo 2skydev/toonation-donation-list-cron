@@ -16,7 +16,9 @@ export const recordProfileDiagnostics = async (stage = 'profile') => {
       'Default/Cookies',
     ];
     const files = await Promise.all(paths.map(async (path) => {
-      const info = await Deno.stat(`./.cache/toonation-profile/${path}`).catch(
+      const info = await Deno.stat(
+        `./.cache/toonation-profile-portable/${path}`,
+      ).catch(
         () => null,
       );
 

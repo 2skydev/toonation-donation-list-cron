@@ -223,12 +223,14 @@ Actions의 NetBird 로그는 `%PROGRAMDATA%\Netbird\client.log`에 기록됩니�
 브라우저 진단은 Actions 로그와 `browser-diagnostics-실행ID-시도번호` 아티팩트에 기록되며, 아티팩트는 7일간 보관됩니다.
 
 - `profile.json`: 캐시 복원 여부와 브라우저 실행 전 프로필 파일의 존재 여부. 정확한 캐시 키는 `Cache browser profile` 단계의 로그에 기록됩니다.
+- `profile-after-launch.json`, `profile-after-close.json`: 실행 전후 쿠키 DB의 이름과 속성, 암호화된 값의 해시, OS 암호화 키의 암호문 해시. DB는 읽기 전용으로 조회합니다.
+- `auth-network.jsonl`: 대시보드와 로그인 상태 확인 요청의 상태 코드, 리디렉션 경로, 전송 및 발급 쿠키의 이름과 해시, `IsLogin`과 숫자 상태 코드만 기록합니다. 응답 본문과 원본 헤더는 저장하지 않습니다.
 - `browser-started.json`: 페이지 접속 전 인증 쿠키의 존재 여부와 만료 정보
 - `login-required.json`, `before-login-click.json`: 로그인 화면, 입력 여부, 로그인 버튼과 캡차 토큰의 준비 상태
 - `authenticated.json`: `loginSession`이 `reused`이면 재로그인 없이 대시보드에 진입했고, `new-login`이면 이번 실행에서 로그인했습니다.
 - `failure.json`, `failure.png`: 실패 시 상태와 화면. 입력 필드는 가리며, 로그인 화면 외 페이지는 본문 전체를 가립니다.
 
-쿠키 값, 비밀번호, 캡차 토큰 값, URL의 쿼리와 해시는 진단에 포함하지 않습니다. 원본 프로필과 HTML도 아티팩트에 올리지 않습니다.
+쿠키 진단에는 `toon.at`과 하위 도메인의 모든 경로에 있는 쿠키를 포함해 서버 인증용 HttpOnly 쿠키도 비교합니다. 쿠키 값, 비밀번호, 캡차 토큰 값, URL의 쿼리와 해시는 진단에 포함하지 않습니다. 쿠키 값은 일치 여부를 비교하는 SHA-256 해시만 기록합니다. 원본 프로필과 HTML도 아티팩트에 올리지 않습니다.
 
 세션만 확인하려면 `Run workflow`에서 `login_check_only`를 선택합니다. 후원 조회와 Webhook 전송 없이 로그인까지만 진행하며, 두 번 연속 실행해 두 번째 실행의 `authenticated.json`이 `reused`인지 확인합니다. 캐시가 복원됐더라도 인증 쿠키가 없거나 만료되었거나 서버에서 거부되면 재로그인이 필요합니다.
 

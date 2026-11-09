@@ -8,6 +8,7 @@ import {
   recordBrowserDiagnostics,
   recordProfileDiagnostics,
 } from './diagnostics.ts';
+import { startAuthDiagnostics } from './auth-diagnostics.ts';
 
 const PAGE_TIMEOUT = 60_000;
 
@@ -27,6 +28,7 @@ const context = await launchPersistentContext({
 });
 
 const page = context.pages()[0] ?? await context.newPage();
+const stopAuthDiagnostics = startAuthDiagnostics(context);
 let loginSession: LoginSession = 'unverified';
 
 const donationItems: ToonationDonationItem[] = [];
@@ -75,6 +77,7 @@ const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
 };
 
 try {
+  await recordProfileDiagnostics('profile-after-launch');
   await recordBrowserDiagnostics(page, 'browser-started', loginSession);
   await page.goto('https://toon.at/streamer/dashboard', {
     waitUntil: 'domcontentloaded',
@@ -150,7 +153,9 @@ try {
   await recordBrowserDiagnostics(page, 'failure', loginSession, true);
   throw error;
 } finally {
+  await stopAuthDiagnostics();
   console.info('브라우저 종료 시작');
   await context.close();
   console.info('브라우저 종료 완료');
+  await recordProfileDiagnostics('profile-after-close');
 }

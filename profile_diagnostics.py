@@ -1,7 +1,9 @@
 import hashlib
 import json
 import sqlite3
+import sys
 import time
+import base64
 from pathlib import Path
 
 profile = Path('.cache/toonation-profile')
@@ -12,6 +14,31 @@ key_hashes = {
     for name in ('encrypted_key', 'app_bound_encrypted_key')
     if isinstance(value := state.get('os_crypt', {}).get(name), str)
 }
+dpapi = None
+encoded_key = state.get('os_crypt', {}).get('encrypted_key')
+if sys.platform == 'win32' and isinstance(encoded_key, str):
+    import ctypes
+    from ctypes import wintypes
+
+    encrypted_key = base64.b64decode(encoded_key)
+    if encrypted_key.startswith(b'DPAPI'):
+        class DataBlob(ctypes.Structure):
+            _fields_ = [('size', wintypes.DWORD), ('data', ctypes.POINTER(ctypes.c_ubyte))]
+
+        buffer = ctypes.create_string_buffer(encrypted_key[5:])
+        source = DataBlob(len(encrypted_key) - 5, ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)))
+        output = DataBlob()
+        crypt32 = ctypes.WinDLL('crypt32', use_last_error=True)
+        crypt32.CryptUnprotectData.argtypes = [ctypes.POINTER(DataBlob), ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(DataBlob)]
+        crypt32.CryptUnprotectData.restype = wintypes.BOOL
+        success = crypt32.CryptUnprotectData(ctypes.byref(source), None, None, None, None, 0, ctypes.byref(output))
+        dpapi = {'canDecrypt': bool(success), 'errorCode': 0 if success else ctypes.get_last_error()}
+        if success:
+            ctypes.memset(output.data, 0, output.size)
+            kernel32 = ctypes.WinDLL('kernel32')
+            kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+            kernel32.LocalFree.restype = ctypes.c_void_p
+            kernel32.LocalFree(output.data)
 databases = []
 
 for relative_path in ('Default/Network/Cookies', 'Default/Cookies'):
@@ -54,4 +81,4 @@ for relative_path in ('Default/Network/Cookies', 'Default/Cookies'):
         database['unavailable'] = True
     databases.append(database)
 
-print(json.dumps({'keyHashes': key_hashes, 'databases': databases}))
+print(json.dumps({'keyHashes': key_hashes, 'dpapi': dpapi, 'databases': databases}))

@@ -99,8 +99,8 @@ jobs:
           $releaseUrl = 'https://github.com/netbirdio/netbird/releases/download/v0.79.0'
           $archivePath = Join-Path $netbirdDir $archive
           $checksumsPath = Join-Path $netbirdDir 'checksums.txt'
-          Invoke-WebRequest "$releaseUrl/$archive" -OutFile $archivePath
-          Invoke-WebRequest "$releaseUrl/netbird_0.79.0_checksums.txt" -OutFile $checksumsPath
+          Invoke-WebRequest "$releaseUrl/$archive" -OutFile $archivePath -MaximumRetryCount 3 -RetryIntervalSec 5
+          Invoke-WebRequest "$releaseUrl/netbird_0.79.0_checksums.txt" -OutFile $checksumsPath -MaximumRetryCount 3 -RetryIntervalSec 5
 
           $checksumLine = Get-Content $checksumsPath | Where-Object { ($_ -split '\s+')[1] -eq $archive }
           if (-not $checksumLine) { throw 'NetBird checksum not found.' }

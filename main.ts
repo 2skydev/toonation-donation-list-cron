@@ -20,10 +20,11 @@ const context = await launchPersistentContext({
   userDataDir: './.cache/toonation-profile',
   args: [
     '--fingerprint=1212',
+    '--restore-last-session',
   ],
 });
 
-const page = await context.newPage();
+const page = context.pages()[0] ?? await context.newPage();
 let loginSession: LoginSession = 'unverified';
 
 const donationItems: ToonationDonationItem[] = [];

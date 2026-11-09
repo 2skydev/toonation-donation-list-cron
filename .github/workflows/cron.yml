@@ -101,7 +101,7 @@ jobs:
           TOONATION_PASSWORD: ${{ secrets.TOONATION_PASSWORD }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          BROWSER_PROFILE_CACHE_KEY: ${{ steps.profile.outputs.cache-matched-key }}
+          BROWSER_PROFILE_CACHE_HIT: ${{ steps.profile.outputs.cache-hit }}
           LOGIN_CHECK_ONLY: ${{ inputs.login_check_only }}
         run: |
           $netbirdDir = Join-Path $env:RUNNER_TEMP 'netbird'

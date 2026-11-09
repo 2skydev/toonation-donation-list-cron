@@ -218,7 +218,7 @@ Actions의 NetBird 로그는 `%PROGRAMDATA%\Netbird\client.log`에 기록됩니�
 
 브라우저 진단은 Actions 로그와 `browser-diagnostics-실행ID-시도번호` 아티팩트에 기록되며, 아티팩트는 7일간 보관됩니다.
 
-- `profile.json`: 복원한 캐시 키와 브라우저 실행 전 프로필 파일의 존재 여부
+- `profile.json`: 캐시 복원 여부와 브라우저 실행 전 프로필 파일의 존재 여부. 정확한 캐시 키는 `Cache browser profile` 단계의 로그에 기록됩니다.
 - `browser-started.json`: 페이지 접속 전 인증 쿠키의 존재 여부와 만료 정보
 - `login-required.json`, `before-login-click.json`: 로그인 화면, 입력 여부, 로그인 버튼과 캡차 토큰의 준비 상태
 - `authenticated.json`: `loginSession`이 `reused`이면 재로그인 없이 대시보드에 진입했고, `new-login`이면 이번 실행에서 로그인했습니다.

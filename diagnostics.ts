@@ -20,11 +20,12 @@ export const recordProfileDiagnostics = async () => {
 
       return { path, exists: info !== null, size: info?.size ?? null };
     }));
-    const cacheMatchedKey = Deno.env.get('BROWSER_PROFILE_CACHE_KEY') || null;
+    // cache-hit은 접두사로 복원하면 'false', 캐시가 없으면 빈 문자열입니다.
+    const cacheHit = Deno.env.get('BROWSER_PROFILE_CACHE_HIT') || null;
     const report = {
       recordedAt: new Date().toISOString(),
-      cacheMatchedKey,
-      cacheRestored: cacheMatchedKey !== null,
+      cacheHit,
+      cacheRestored: cacheHit !== null,
       files,
     };
 

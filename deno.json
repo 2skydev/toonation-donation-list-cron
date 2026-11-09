@@ -12,7 +12,8 @@
     }
   },
   "imports": {
-    "cloakbrowser": "npm:cloakbrowser@0.5.10",
-    "playwright-core": "npm:playwright-core@1.55.0"
+    "cloakbrowser": "npm:cloakbrowser@0.7.1",
+    "playwright-core": "npm:playwright-core@1.55.0",
+    "tar": "npm:tar@7.5.22"
   }
 }

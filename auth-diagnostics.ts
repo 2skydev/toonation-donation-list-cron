@@ -25,6 +25,7 @@ export const cookieValueHash = async (value: string) => {
 const describeCookie = async (header: string) => {
   const [cookie, ...parts] = header.split(';');
   const separator = cookie.indexOf('=');
+  if (separator <= 0) return null;
   const attributes = new Map(parts.map((part) => {
     const [name, ...value] = part.trim().split('=');
     return [name.toLowerCase(), value.join('=')];
@@ -57,7 +58,7 @@ const recordAuthResponse = async (request: Request) => {
       response.headerValue('location'),
       response.headerValue('content-type'),
     ]);
-  const data = contentType?.includes('json')
+  const data = url.pathname.startsWith('/dapi/')
     ? await response.json().catch(() => null)
     : null;
   const report = {
@@ -65,6 +66,7 @@ const recordAuthResponse = async (request: Request) => {
     method: request.method(),
     url: `${url.origin}${url.pathname}`,
     status: response.status(),
+    contentType,
     location: location ? new URL(location, url).pathname : null,
     fromServiceWorker: response.fromServiceWorker(),
     requestCookies: await Promise.all(
@@ -76,7 +78,8 @@ const recordAuthResponse = async (request: Request) => {
         };
       }),
     ),
-    setCookies: await Promise.all(setCookieHeaders.map(describeCookie)),
+    setCookies: (await Promise.all(setCookieHeaders.map(describeCookie)))
+      .filter((cookie) => cookie !== null),
     result: data
       ? {
         IsLogin: typeof data.IsLogin === 'boolean' ? data.IsLogin : null,

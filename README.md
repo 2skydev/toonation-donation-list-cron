@@ -106,7 +106,9 @@ GitHub Actions 자체 스케줄이 불안정해 외부 cron으로 전환했습�
 
 세부 설정은 [cron.yml](.github/workflows/cron.yml)에 있습니다. 프록시 통신 확인 후 크롤링을 시작하며, 종료 시 NetBird 프로세스를 정리합니다.
 
-`--restore-last-session`으로 이전 브라우저 세션을 복원해 만료일이 없는 인증 쿠키도 재사용합니다. 복원된 탭을 재사용하며, 인증이 만료되거나 서버에서 거부되면 다시 로그인합니다. 서로 다른 Windows 러너 사이에서 프로필을 복원할 때는 쿠키 암호화로 인한 복호화 실패 여부도 별도로 확인해야 합니다.
+`--restore-last-session`으로 이전 브라우저 세션과 세션 쿠키 복원을 요청합니다. 복원된 탭을 재사용하며, 인증이 만료되거나 서버에서 거부되면 다시 로그인합니다.
+
+현재 Windows 2025와 CloakBrowser Chromium 146에서는 서로 다른 러너에 복원한 프로필의 쿠키 암호화 키를 DPAPI로 복호화하지 못하는 것을 [Actions에서 확인했습니다](https://github.com/2skydev/toonation-donation-list-cron/actions/runs/42564372076). 캐시의 키와 쿠키 DB는 그대로 복원됐지만, 기존 키는 `0x8009000B`로 복호화에 실패하고 브라우저가 생성한 새 키는 정상 복호화됐습니다. 서버 세션 쿠키 `__toonation_session_id__`와 `__api_toonation_session_id__`의 기존 값이 유지되지 않아 `/dapi/streamer/common`이 `IsLogin: false`를 반환했습니다. 따라서 현재 구성에서는 프로필 파일 복사만으로 서버 로그인 상태가 유지되지 않습니다. 이 원인 확인을 위해 추가 인증 로직을 도입하지 않았습니다.
 
 페이지 이동은 `DOMContentLoaded` 이후 로그인 입력창 또는 대시보드 헤더가 나타날 때까지 기다립니다. 로그인 화면에서는 입력창 상위 요소의 진입 애니메이션이 끝난 뒤 입력하고, 캡차 완료로 로그인 버튼이 활성화된 뒤 클릭합니다. 각 대기에는 최대 60초를 허용합니다.
 
@@ -223,7 +225,7 @@ Actions의 NetBird 로그는 `%PROGRAMDATA%\Netbird\client.log`에 기록됩니�
 브라우저 진단은 Actions 로그와 `browser-diagnostics-실행ID-시도번호` 아티팩트에 기록되며, 아티팩트는 7일간 보관됩니다.
 
 - `profile.json`: 캐시 복원 여부와 브라우저 실행 전 프로필 파일의 존재 여부. 정확한 캐시 키는 `Cache browser profile` 단계의 로그에 기록됩니다.
-- `profile-after-launch.json`, `profile-after-close.json`: 실행 전후 쿠키 DB의 이름과 속성, 암호화된 값의 해시, OS 암호화 키의 암호문 해시. DB는 읽기 전용으로 조회합니다.
+- `profile-after-launch.json`, `profile-after-close.json`: 실행 전후 쿠키 DB의 이름과 속성, 암호화된 값의 해시, OS 암호화 키의 암호문 해시와 Windows DPAPI 복호화 성공 여부. DB는 읽기 전용으로 조회하며 복호화된 키는 기록하지 않습니다.
 - `auth-network.jsonl`: 대시보드와 로그인 상태 확인 요청의 상태 코드, 리디렉션 경로, 전송 및 발급 쿠키의 이름과 해시, `IsLogin`과 숫자 상태 코드만 기록합니다. 응답 본문과 원본 헤더는 저장하지 않습니다.
 - `browser-started.json`: 페이지 접속 전 인증 쿠키의 존재 여부와 만료 정보
 - `login-required.json`, `before-login-click.json`: 로그인 화면, 입력 여부, 로그인 버튼과 캡차 토큰의 준비 상태

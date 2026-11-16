@@ -180,7 +180,23 @@ jobs:
                   if ($probe -lt 4) { Start-Sleep -Seconds (4 * $probe) }
                 }
               }
-              if ($reachable) { break }
+              $networks = (& $netbirdExe networks list) -join "`n"
+              if ($LASTEXITCODE -eq 0 -and $networks -match 'Available Networks:|No networks available\.') {
+                $entries = [regex]::Matches($networks, '(?m)^\s*- ID: (.+)\n\s*Network: (.+)\n\s*Status: (Selected|Not Selected)\s*$')
+                $exitCount = 0
+                foreach ($entry in $entries) {
+                  $prefixes = @($entry.Groups[2].Value.Trim() -split ',\s*' | Where-Object { $_ -in '0.0.0.0/0','::/0' })
+                  if ($prefixes.Count -eq 0) { continue }
+                  $exitCount++
+                  $id = [Text.Encoding]::UTF8.GetBytes($entry.Groups[1].Value.Trim().ToLowerInvariant())
+                  $idHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($id)).Substring(0,16)
+                  Write-Host "NetBird exit route prefixes=$($prefixes -join ',') status=$($entry.Groups[3].Value) idHash=$idHash"
+                }
+                $available = [regex]::Matches($networks, '(?m)^\s*- ID: ').Count
+                Write-Host "NetBird routes connection=$connection available=$available exitRoutes=$exitCount"
+              } else {
+                Write-Warning 'NetBird route list unavailable.'
+              }
 
               $statusJson = & $netbirdExe status --json
               if ($LASTEXITCODE -eq 0) {
@@ -188,6 +204,7 @@ jobs:
                 Write-Host "NetBird management=$($state.management.connected) signal=$($state.signal.connected) peers=$($state.peers.connected)/$($state.peers.total) relays=$($state.relays.available)/$($state.relays.total)"
               }
 
+              if ($reachable) { break }
               if ($connection -eq 2) { throw 'NetBird proxy did not become reachable after reconnecting.' }
               Write-Warning 'Reconnecting NetBird before the next proxy check.'
               & $netbirdExe down

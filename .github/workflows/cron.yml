@@ -160,17 +160,27 @@ jobs:
                 Start-Sleep -Seconds 2
               }
 
+              $reachable = $false
               if ($ready) {
-                curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 15 --max-time 30 `
-                  --retry 1 --retry-connrefused --retry-delay 3 --fail `
-                  --silent --show-error --output NUL --write-out "Proxy check HTTP status: %{http_code} (total %{time_total}s)\n" `
-                  https://toon.at/streamer/dashboard
-                $curlCode = $LASTEXITCODE
-                if ($curlCode -eq 0) { break }
-                if ($curlCode -notin 5,6,7,28,35,52,55,56,97) {
-                  throw "Proxy check failed (curl exit code: $curlCode)."
+                for ($probe = 1; $probe -le 4; $probe++) {
+                  $http = curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 15 --max-time 30 `
+                    --silent --show-error --output NUL --write-out "%{http_code}" https://toon.at/streamer/dashboard
+                  $curlCode = $LASTEXITCODE
+                  Write-Host "Proxy check HTTP status: $http (connection $connection, probe $probe)"
+                  if ($curlCode -eq 0 -and $http -match '^[23]') {
+                    $reachable = $true
+                    break
+                  }
+                  if ($curlCode -eq 0 -and $http -notmatch '^(408|429|5[0-9]{2})$') {
+                    throw "Proxy check failed (HTTP $http)."
+                  }
+                  if ($curlCode -notin 0,5,6,7,28,35,52,55,56,97) {
+                    throw "Proxy check failed (curl exit code: $curlCode)."
+                  }
+                  if ($probe -lt 4) { Start-Sleep -Seconds (4 * $probe) }
                 }
               }
+              if ($reachable) { break }
 
               $statusJson = & $netbirdExe status --json
               if ($LASTEXITCODE -eq 0) {

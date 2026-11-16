@@ -113,15 +113,15 @@ GitHub Actions 자체 스케줄이 불안정해 외부 cron으로 전환했습�
 | 브라우저 | CloakBrowser SDK 0.7.1, 실행 시작 시 조회한 최신 안정 Chromium |
 | 프록시 | NetBird 0.79.0 직접 실행 · netstack SOCKS5 |
 | 캐시 | 브라우저 바이너리와 암호화된 로그인 프로필 재사용 |
-| 제한 시간 | NetBird 연결과 크롤링 단계에 10분 |
+| 제한 시간 | NetBird 연결과 크롤링 단계에 15분 |
 
-세부 설정은 [cron.yml](.github/workflows/cron.yml)에 있습니다. 프록시 통신 확인 후 크롤링을 시작하며, 종료 시 NetBird 프로세스를 정리합니다.
+세부 설정은 [cron.yml](.github/workflows/cron.yml)에 있습니다. 프록시 확인 요청이 타임아웃되거나 SOCKS5 경로가 아직 준비되지 않았으면 대기 간격을 늘려 연결당 최대 네 번 확인합니다. 연결이 계속 실패하면 피어와 릴레이 연결 수를 로그에 남기고 NetBird를 한 번 다시 연결합니다. 연결을 확인한 뒤 크롤링을 시작하며, 종료 시 NetBird 프로세스를 정리합니다.
 
 실행 시작 시 Windows용 최신 안정 버전을 조회하고 해당 버전의 바이너리 캐시를 복원합니다. 다운로드는 SDK의 서명 검증을 거치며, 조회에 실패하거나 다운로드 결과가 다르면 실행을 중단합니다. 버전 확인 뒤에는 그 실행에서 사용할 버전을 고정합니다. 브라우저 바이너리 폴더만 캐시하며 라이선스 저장 파일과 검증 캐시는 포함하지 않습니다.
 
 기존 Chromium 146에서는 프로필을 다른 Windows 러너에 복원하면 DPAPI 키 복호화가 `0x8009000B`로 실패하는 것을 [Actions에서 확인했습니다](https://github.com/2skydev/toonation-donation-list-cron/actions/runs/42564372076). 서버 세션 쿠키 값이 유지되지 않고 `/dapi/streamer/common`이 `IsLogin: false`를 반환했습니다.
 
-이를 해결하기 위해 Chromium 151 이상에서 지원하는 [`--fingerprint-portable-cookies`](https://github.com/CloakHQ/CloakBrowser#fingerprint-management)를 첫 실행부터 적용합니다. 이전 DPAPI 프로필을 가져오지 않고 `.cache/toonation-profile-portable`과 새 캐시 네임스페이스로 시작하므로, 전환 후 최초 실행은 기존 로그인 화면을 통해 새로 인증해야 합니다. 이후에는 암호화된 프로필을 복원하고, `--restore-last-session`으로 이전 탭과 세션 쿠키를 복원합니다. 인증이 만료되거나 서버에서 거부되면 다시 로그인합니다.
+이를 해결하기 위해 Chromium 151 이상에서 지원하는 [`--fingerprint-portable-cookies`](https://github.com/CloakHQ/CloakBrowser#fingerprint-management)를 첫 실행부터 적용합니다. 이전 DPAPI 프로필을 가져오지 않고 `.cache/toonation-profile-portable`과 새 캐시 네임스페이스로 시작하므로, 전환 후 최초 실행은 기존 로그인 화면을 통해 새로 인증해야 합니다. 이후에는 암호화된 프로필을 복원하고, `--restore-last-session`으로 이전 탭과 세션 쿠키를 복원합니다. 복원된 탭은 정리하고 새 탭 하나에서 대시보드를 엽니다. 브라우저 기동 또는 첫 대시보드 로딩 시간이 초과되면 각각 한 번 재시도합니다. 인증이 만료되거나 서버에서 거부되면 다시 로그인합니다.
 
 프로필 캐시는 브라우저 버전이 바뀌어도 이어서 사용합니다. 실행은 저장소 내에서 순차 처리하며, 성공적으로 브라우저가 닫힌 뒤 프로필을 암호화하고 성공한 작업의 캐시만 저장합니다.
 
@@ -208,7 +208,7 @@ docker rm --force netbird-local
 | 404 + 본문 `not-found-last-donation` | 다음 페이지를 추가해 누적 목록 재전송 |
 | 그 외 오류 | 실행 실패 |
 
-현재 구현에서는 추가 페이지 조회가 끝나도 최초 404를 오류로 처리합니다.
+수신 서버에서 추가 페이지를 요청했는데 조회할 내역이 더 없으면 오류를 기록하고 종료합니다. 전송 결과가 불확실한 네트워크 오류에서는 같은 요청을 자동 재전송하지 않습니다.
 
 <details>
 <summary>서명 검증 방법</summary>

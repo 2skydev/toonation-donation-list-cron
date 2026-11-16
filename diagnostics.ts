@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import type { Page } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
-import { cookieValueHash } from './auth-diagnostics.ts';
+import { cookieValueHash, readDiagnostic } from './auth-diagnostics.ts';
 
 const DIAGNOSTICS_DIR = './.cache/diagnostics';
 
@@ -67,8 +67,8 @@ export const recordBrowserDiagnostics = async (
   try {
     const url = new URL(page.url());
     const [cookies, state] = await Promise.allSettled([
-      page.context().cookies(),
-      page.evaluate(() => {
+      readDiagnostic(page.context().cookies()),
+      readDiagnostic(page.evaluate(() => {
         const input = (selector: string) =>
           document.querySelector<HTMLInputElement>(selector);
         const loginButton = [...document.querySelectorAll('button')].find(
@@ -90,7 +90,7 @@ export const recordBrowserDiagnostics = async (
           captchaResponsePresent: captcha !== null,
           captchaHasToken: Boolean(captcha?.value),
         };
-      }),
+      })),
     ]);
     const report = {
       recordedAt: new Date().toISOString(),
@@ -100,7 +100,7 @@ export const recordBrowserDiagnostics = async (
       page: url.protocol === 'about:'
         ? 'about:blank'
         : `${url.origin}${url.pathname}`,
-      siteCookies: cookies.status === 'fulfilled'
+      siteCookies: cookies.status === 'fulfilled' && cookies.value
         ? await Promise.all(
           cookies.value.filter((cookie) =>
             cookie.domain.replace(/^\./, '') === 'toon.at' ||

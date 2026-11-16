@@ -34,8 +34,8 @@ jobs:
       - name: Install dependencies
         run: deno install --frozen
 
-      - name: Test profile encryption
-        run: deno test --frozen -A profile-cache_test.ts
+      - name: Run tests
+        run: deno test --frozen -A
 
       - name: Resolve browser version
         id: browser
@@ -81,15 +81,6 @@ jobs:
             console.log(path);
           '
 
-      - name: Check browser launch
-        run: |
-          deno eval --frozen '
-            import { launch } from "cloakbrowser";
-            const browser = await launch();
-            console.log(await browser.version());
-            await browser.close();
-          '
-
       - name: Install NetBird
         shell: pwsh
         run: |
@@ -127,7 +118,7 @@ jobs:
 
       - name: Run main.ts with NetBird
         shell: pwsh
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
           NB_USE_NETSTACK_MODE: 'true'
@@ -151,28 +142,74 @@ jobs:
               Start-Sleep -Seconds 1
             }
             if ($LASTEXITCODE -ne 0) { throw 'NetBird daemon startup timed out.' }
-            & $netbirdExe up
-            if ($LASTEXITCODE -ne 0) { throw 'NetBird login failed.' }
+            for ($connection = 1; $connection -le 2; $connection++) {
+              & $netbirdExe up
+              if ($LASTEXITCODE -ne 0) { throw 'NetBird login failed.' }
 
-            $ready = $false
-            for ($attempt = 0; $attempt -lt 10; $attempt++) {
-              if ($daemon.HasExited) { throw 'NetBird daemon exited before connecting.' }
-              & $netbirdExe status --check ready *> $null
-              if ($LASTEXITCODE -eq 0) {
-                $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 1080 -State Listen -ErrorAction SilentlyContinue
-                if ($listener) {
-                  $ready = $true
-                  break
+              $ready = $false
+              for ($attempt = 0; $attempt -lt 15; $attempt++) {
+                if ($daemon.HasExited) { throw 'NetBird daemon exited before connecting.' }
+                & $netbirdExe status --check startup *> $null
+                if ($LASTEXITCODE -eq 0) {
+                  $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 1080 -State Listen -ErrorAction SilentlyContinue
+                  if ($listener) {
+                    $ready = $true
+                    break
+                  }
+                }
+                Start-Sleep -Seconds 2
+              }
+
+              $reachable = $false
+              if ($ready) {
+                for ($probe = 1; $probe -le 4; $probe++) {
+                  $http = curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 15 --max-time 30 `
+                    --silent --show-error --output NUL --write-out "%{http_code}" https://toon.at/streamer/dashboard
+                  $curlCode = $LASTEXITCODE
+                  Write-Host "Proxy check HTTP status: $http (connection $connection, probe $probe)"
+                  if ($curlCode -eq 0 -and $http -match '^[23]') {
+                    $reachable = $true
+                    break
+                  }
+                  if ($curlCode -eq 0 -and $http -notmatch '^(408|429|5[0-9]{2})$') {
+                    throw "Proxy check failed (HTTP $http)."
+                  }
+                  if ($curlCode -notin 0,5,6,7,28,35,52,55,56,97) {
+                    throw "Proxy check failed (curl exit code: $curlCode)."
+                  }
+                  if ($probe -lt 4) { Start-Sleep -Seconds (4 * $probe) }
                 }
               }
-              Start-Sleep -Seconds 2
-            }
-            if (-not $ready) { throw 'NetBird connection timed out.' }
+              $networks = (& $netbirdExe networks list) -join "`n"
+              if ($LASTEXITCODE -eq 0 -and $networks -match 'Available Networks:|No networks available\.') {
+                $entries = [regex]::Matches($networks, '(?m)^\s*- ID: (.+)\n\s*Network: (.+)\n\s*Status: (Selected|Not Selected)\s*$')
+                $exitCount = 0
+                foreach ($entry in $entries) {
+                  $prefixes = @($entry.Groups[2].Value.Trim() -split ',\s*' | Where-Object { $_ -in '0.0.0.0/0','::/0' })
+                  if ($prefixes.Count -eq 0) { continue }
+                  $exitCount++
+                  $id = [Text.Encoding]::UTF8.GetBytes($entry.Groups[1].Value.Trim().ToLowerInvariant())
+                  $idHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($id)).Substring(0,16)
+                  Write-Host "NetBird exit route prefixes=$($prefixes -join ',') status=$($entry.Groups[3].Value) idHash=$idHash"
+                }
+                $available = [regex]::Matches($networks, '(?m)^\s*- ID: ').Count
+                Write-Host "NetBird routes connection=$connection available=$available exitRoutes=$exitCount"
+              } else {
+                Write-Warning 'NetBird route list unavailable.'
+              }
 
-            curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 10 --max-time 30 `
-              --silent --show-error --output NUL --write-out "Proxy check HTTP status: %{http_code}\n" `
-              https://toon.at/streamer/dashboard
-            if ($LASTEXITCODE -ne 0) { throw "NetBird SOCKS5 request failed (curl exit code: $LASTEXITCODE)." }
+              $statusJson = & $netbirdExe status --json
+              if ($LASTEXITCODE -eq 0) {
+                $state = $statusJson | ConvertFrom-Json
+                Write-Host "NetBird management=$($state.management.connected) signal=$($state.signal.connected) peers=$($state.peers.connected)/$($state.peers.total) relays=$($state.relays.available)/$($state.relays.total)"
+              }
+
+              if ($reachable) { break }
+              if ($connection -eq 2) { throw 'NetBird proxy did not become reachable after reconnecting.' }
+              Write-Warning 'Reconnecting NetBird before the next proxy check.'
+              & $netbirdExe down
+              if ($LASTEXITCODE -ne 0) { throw 'NetBird disconnect failed.' }
+            }
 
             deno run --frozen -A main.ts
             if ($LASTEXITCODE -ne 0) { throw "Crawling failed (Deno exit code: $LASTEXITCODE)." }

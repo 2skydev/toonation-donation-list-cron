@@ -33,6 +33,7 @@ export async function sendSignedWebhook(
 
   return fetch(url, {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: {
       'Content-Type': 'application/json',
       [TIMESTAMP_HEADER_KEY]: String(timestampSec),

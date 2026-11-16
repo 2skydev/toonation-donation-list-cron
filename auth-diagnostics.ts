@@ -9,6 +9,19 @@ const AUTH_PATHS = new Set([
   '/dapi/logout/2',
 ]);
 
+// 응답 본문이나 페이지가 멈춰도 진단 때문에 수집과 브라우저 종료를 지연시키지 않습니다.
+export const readDiagnostic = async <T>(work: Promise<T>, timeoutMs = 3000) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export const cookieValueHash = async (value: string) => {
   if (!value) return null;
 
@@ -120,6 +133,6 @@ export const startAuthDiagnostics = (context: BrowserContext) => {
 
   return async () => {
     context.off('requestfinished', onFinished);
-    await Promise.all(pending);
+    await readDiagnostic(Promise.all(pending));
   };
 };

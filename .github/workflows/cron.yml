@@ -34,8 +34,8 @@ jobs:
       - name: Install dependencies
         run: deno install --frozen
 
-      - name: Test profile encryption
-        run: deno test --frozen -A profile-cache_test.ts
+      - name: Run tests
+        run: deno test --frozen -A
 
       - name: Resolve browser version
         id: browser
@@ -81,15 +81,6 @@ jobs:
             console.log(path);
           '
 
-      - name: Check browser launch
-        run: |
-          deno eval --frozen '
-            import { launch } from "cloakbrowser";
-            const browser = await launch();
-            console.log(await browser.version());
-            await browser.close();
-          '
-
       - name: Install NetBird
         shell: pwsh
         run: |
@@ -127,7 +118,7 @@ jobs:
 
       - name: Run main.ts with NetBird
         shell: pwsh
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
           NB_USE_NETSTACK_MODE: 'true'
@@ -169,7 +160,8 @@ jobs:
             }
             if (-not $ready) { throw 'NetBird connection timed out.' }
 
-            curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 10 --max-time 30 `
+            curl.exe --proxy socks5h://127.0.0.1:1080 --noproxy "" --connect-timeout 10 --max-time 25 `
+              --retry 3 --retry-connrefused --retry-delay 3 --retry-max-time 80 --fail `
               --silent --show-error --output NUL --write-out "Proxy check HTTP status: %{http_code}\n" `
               https://toon.at/streamer/dashboard
             if ($LASTEXITCODE -ne 0) { throw "NetBird SOCKS5 request failed (curl exit code: $LASTEXITCODE)." }

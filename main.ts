@@ -1,7 +1,7 @@
 import { launchPersistentContext } from 'cloakbrowser';
-import { getDonationItems } from './toonation.ts';
+import { errors, type Page } from 'playwright-core';
+import { getDonationItems, sendDonationPages } from './toonation.ts';
 import { config } from './config.ts';
-import { ToonationDonationItem } from './types.ts';
 import { sendSignedWebhook } from './webhook.ts';
 import {
   type LoginSession,
@@ -11,89 +11,70 @@ import {
 import { startAuthDiagnostics } from './auth-diagnostics.ts';
 
 const PAGE_TIMEOUT = 60_000;
+const DASHBOARD_HEADER = 'header[class*="_RouteDashboardHeader_"]';
 
 await recordProfileDiagnostics();
 
-const context = await launchPersistentContext({
-  headless: false,
-  humanize: true,
-  proxy: 'socks5://127.0.0.1:1080',
-  locale: 'ko-KR',
-  timezone: 'Asia/Seoul',
-  userDataDir: './.cache/toonation-profile-portable',
-  args: [
-    '--fingerprint=1212',
-    '--fingerprint-portable-cookies',
-    '--restore-last-session',
-  ],
-});
+const launchBrowser = () =>
+  launchPersistentContext({
+    launchOptions: { timeout: 90_000 },
+    headless: false,
+    humanize: true,
+    proxy: 'socks5://127.0.0.1:1080',
+    locale: 'ko-KR',
+    timezone: 'Asia/Seoul',
+    userDataDir: './.cache/toonation-profile-portable',
+    args: [
+      '--fingerprint=1212',
+      '--fingerprint-portable-cookies',
+      '--restore-last-session',
+    ],
+  });
 
-const page = context.pages()[0] ?? await context.newPage();
+const context = await launchBrowser().catch((error) => {
+  if (!(error instanceof errors.TimeoutError)) throw error;
+
+  console.warn('브라우저 기동 시간이 초과되어 한 번 더 시도합니다.');
+  return launchBrowser();
+});
+context.setDefaultTimeout(PAGE_TIMEOUT);
+
 const stopAuthDiagnostics = startAuthDiagnostics(context);
 let loginSession: LoginSession = 'unverified';
+let page: Page | undefined;
 
-const donationItems: ToonationDonationItem[] = [];
-
-const getDonationItemsAndSendWebhook = async (pageNumber: number) => {
-  donationItems.push(...await getDonationItems(page, pageNumber));
-
-  console.info('크롤링된 후원 아이템 개수:', donationItems.length);
-  console.info('최근 후원 시간:', donationItems[0].createdAt);
-
-  const response = await sendSignedWebhook(
-    config.webhook.url,
-    config.webhook.secret,
-    donationItems,
-  );
-
-  if (response.status === 404) {
-    const text = await response.text();
-
-    if (text === 'not-found-last-donation') {
-      console.log(
-        `webhook에서 not-found-last-donation를 받았습니다. 다음 페이지를 포함하여 탐색합니다. (pageNumber: ${pageNumber})`,
-      );
-
-      await getDonationItemsAndSendWebhook(pageNumber + 1);
-    }
-
-    console.error('webhook에서 오류 응답을 받았습니다.');
-    console.error(`[${response.status}]`, text);
-    throw new Error(text);
-  }
-
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error('webhook에서 오류 응답을 받았습니다.');
-    console.error(`[${response.status}]`, errText);
-    throw new Error(errText);
-  }
-
-  const okText = await response.text();
-  console.log(
-    `webhook에서 성공적으로 응답을 받았습니다. (pageNumber: ${pageNumber})`,
-  );
-
-  console.log(`[${response.status}]`, okText);
-};
-
-try {
-  await recordProfileDiagnostics('profile-after-launch');
-  await recordBrowserDiagnostics(page, 'browser-started', loginSession);
+const openDashboard = async (page: Page) => {
   await page.goto('https://toon.at/streamer/dashboard', {
     waitUntil: 'domcontentloaded',
     timeout: PAGE_TIMEOUT,
   });
+  await page.getByPlaceholder('아이디 입력')
+    .or(page.locator(DASHBOARD_HEADER))
+    .first().waitFor({ timeout: PAGE_TIMEOUT });
+};
+
+try {
+  await recordProfileDiagnostics('profile-after-launch');
+  // 로그인 쿠키는 유지하고 이전 실행에서 복원된 대시보드 탭은 정리합니다.
+  const restoredPages = context.pages();
+  page = await context.newPage();
+  await Promise.all(restoredPages.map((restored) => restored.close()));
+  await recordBrowserDiagnostics(page, 'browser-started', loginSession);
+
+  try {
+    await openDashboard(page);
+  } catch (error) {
+    if (!(error instanceof errors.TimeoutError)) throw error;
+
+    console.warn('대시보드 로딩 시간이 초과되어 새 탭에서 다시 엽니다.');
+    const previous = page;
+    page = await context.newPage();
+    await previous.close();
+    await openDashboard(page);
+  }
 
   const loginInput = page.getByPlaceholder('아이디 입력');
-  const dashboardHeader = page.locator(
-    'header[class*="_RouteDashboardHeader_"]',
-  );
-
-  // 페이지 로드 이후 진행되는 인증 확인과 화면 렌더링을 기다립니다.
-  await loginInput.or(dashboardHeader).first().waitFor({
-    timeout: PAGE_TIMEOUT,
-  });
+  const dashboardHeader = page.locator(DASHBOARD_HEADER);
 
   if (new URL(page.url()).pathname === '/streamer/login') {
     loginSession = 'required';
@@ -148,10 +129,15 @@ try {
   await recordBrowserDiagnostics(page, 'authenticated', loginSession);
 
   if (Deno.env.get('LOGIN_CHECK_ONLY') !== 'true') {
-    await getDonationItemsAndSendWebhook(1);
+    const dashboard = page;
+    await sendDonationPages(
+      (number) => getDonationItems(dashboard, number),
+      (items) =>
+        sendSignedWebhook(config.webhook.url, config.webhook.secret, items),
+    );
   }
 } catch (error) {
-  await recordBrowserDiagnostics(page, 'failure', loginSession, true);
+  if (page) await recordBrowserDiagnostics(page, 'failure', loginSession, true);
   throw error;
 } finally {
   await stopAuthDiagnostics();
